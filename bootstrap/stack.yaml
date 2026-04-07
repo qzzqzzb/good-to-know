@@ -1,0 +1,9 @@
+runtime_skill: runtime/codex-agent-loop
+memory_skill: memory/naive-memory
+context_skills:
+  - context/naive-context
+discovery_skills:
+  - discovery/web-discovery
+output_skills:
+  - output/notion-briefing
+run_output_dir: runs

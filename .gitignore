@@ -1,0 +1,9 @@
+tmp/
+.DS_Store
+__pycache__/
+.omx/
+.codex/
+runs/*
+!runs/README.md
+AGENTS.md
+personal_input_agent_design_brief.md

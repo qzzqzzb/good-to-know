@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "goodtoknow-gtn"
+version = "0.1.0"
+description = "GoodToKnow local product shell"
+readme = "AGENTS.md"
+requires-python = ">=3.10"
+authors = [{name = "GoodToKnow"}]
+dependencies = []
+
+[project.scripts]
+gtn = "runtime.gtn_local_product.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["runtime", "runtime.gtn_local_product*"]

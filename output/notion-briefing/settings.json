@@ -1,0 +1,17 @@
+{
+  "database_name": "GoodToKnow Recommendations",
+  "database_url": "",
+  "parent_page_url": "",
+  "visible_properties": {
+    "title": "Title",
+    "url": "URL",
+    "score": "Score",
+    "summary": "Summary",
+    "tags": "Tags",
+    "status": "Feedback"
+  },
+  "hidden_properties": {
+    "dedup_key": "Dedup Key"
+  },
+  "default_status": "No feedback"
+}
