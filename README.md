@@ -2,16 +2,70 @@
 
 # GoodToKnow
 
-**A local-first recommendation agent that senses broadly, surfaces what you should know now, and co-evolves with the user over time.**
+**A local-first discovery agent that uses your current work context to surface a short briefing of tools, papers, updates, and ideas worth your attention now.**
 
 [![macOS](https://img.shields.io/badge/platform-macOS-black)](#quick-start)
-[![Local First](https://img.shields.io/badge/local--first-yes-2f855a)](#what-is-goodtoknow)
+[![Local First](https://img.shields.io/badge/local--first-yes-2f855a)](#in-10-seconds)
 [![Codex Runtime](https://img.shields.io/badge/runtime-Codex-412991)](#how-it-works)
 [![Notion Output](https://img.shields.io/badge/output-Notion-111111)](#configuration)
 
-<img src="assets/main.jpg" alt="GoodToKnow preview" width="860" />
+<img src="assets/GTN.png" alt="GoodToKnow preview" width="860" />
 
 </div>
+
+_Example of a generated briefing published to Notion._
+
+## In 10 Seconds
+
+GoodToKnow is for people who keep feeling, "I probably missed something useful adjacent to what I'm doing right now."
+
+It runs locally, reads signals from your current work, uses Codex with web search to look outward, and produces a small ranked briefing instead of another infinite feed.
+
+Think of it as a quiet research scout for your real work.
+
+## What You Get
+
+After a run, GoodToKnow produces a few recommendations that are meant to be immediately useful:
+
+- a new tool that fits what you are already building
+- a paper or post that changes how you should approach a problem
+- a release, repo, or opportunity adjacent to your current interests
+
+Each recommendation is turned into a short briefing item with:
+
+- a title
+- a short summary
+- why it was recommended now
+- a longer digest so you can decide whether to dig deeper
+
+By default, the current stack can publish that briefing into Notion.
+
+## Quick Example
+
+If you have been working on coding agents, browsing MCP docs, and reading about memory systems, GoodToKnow might surface:
+
+- an updated agent runtime worth evaluating
+- a memory or retrieval paper relevant to your current setup
+- a repo, launch, or release that overlaps with your current experiments
+
+The point is not to show you everything. The point is to help you notice the few things you probably should know now.
+
+## Why People Use It
+
+- **Quiet by default**  
+  It is meant to run in the background without asking you to constantly manage it.
+
+- **Local-first privacy**  
+  Your personal context stays on your machine instead of being shipped away by default.
+
+- **A briefing, not a feed**  
+  The goal is a small set of useful recommendations, not a stream of endless content.
+
+- **Connected to real work**  
+  Recommendations are tied to what you are actually building, reading, and thinking about.
+
+- **Better recommendations over time**  
+  As you use it and provide feedback, it can gradually recommend things that fit you better.
 
 ## Install In One Line
 
@@ -20,29 +74,6 @@ curl -fsSL https://raw.githubusercontent.com/qzzqzzb/good-to-know/main/scripts/i
 ```
 
 This installs a local `gtn` command and sets up a user-scoped runtime under `~/.gtn`.
-
-## What is GoodToKnow
-
-GoodToKnow is for people who suspect they are missing useful things — tools, papers, updates, ideas, or opportunities adjacent to what they are already doing — but do not want another noisy feed.
-
-It runs quietly in the background, uses your local context to look outward, and surfaces a small number of things that are actually worth your attention.
-
-Why people might want it:
-
-- **Quiet by default**  
-  It is meant to run in the background without asking you to constantly manage it.
-
-- **Local-first privacy**  
-  Your personal context stays on your machine, so the system can learn from your activity without shipping private data away by default.
-
-- **Better recommendations over time**  
-  As you use it, provide feedback, and let it observe more of your context, it can gradually recommend things that fit you better.
-
-- **A briefing, not a feed**  
-  The goal is not to show you everything. The goal is to help you notice the few things you probably should know now.
-
-- **Connected to real work**  
-  Instead of generic discovery, it tries to tie recommendations to what you are actually building, reading, and thinking about.
 
 ## Quick Start
 
