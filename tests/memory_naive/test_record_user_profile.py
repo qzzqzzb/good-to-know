@@ -1,38 +1,25 @@
 from __future__ import annotations
 
-import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-
-
-def load_module(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
-module = load_module(ROOT / "memory/naive-memory/scripts/record_user_profile.py", "record_user_profile")
+from tests.memory_mempalace.helpers import load_memory_module
 
 
 class RecordUserProfileTests(unittest.TestCase):
-    def test_upsert_profile_replaces_previous_profile(self) -> None:
+    def test_record_user_profile_updates_identity_and_stable_record(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            memory_path = Path(tmp) / "user_context.md"
-            memory_path.write_text("# User Context Memory\n\n", encoding="utf-8")
-            module.upsert_profile(memory_path, "I care about agents and product design.")
-            first = memory_path.read_text(encoding="utf-8")
-            self.assertIn("manual_profile:primary", first)
-            self.assertIn("agents and product design", first)
+            tmp_path = Path(tmp)
+            memory_module = load_memory_module(tmp_path, name="mempalace_memory_profile")
+            memory_module.record_user_profile("I care about agents and product design.")
+            identity = (tmp_path / "identity.md").read_text(encoding="utf-8")
+            self.assertIn("agents and product design", identity)
 
-            module.upsert_profile(memory_path, "I care about systems, AI products, and research.")
-            second = memory_path.read_text(encoding="utf-8")
-            self.assertIn("systems, AI products, and research", second)
-            self.assertNotIn("agents and product design.", second)
+            memory_module.record_user_profile("I care about systems, AI products, and research.")
+            updated = (tmp_path / "identity.md").read_text(encoding="utf-8")
+            self.assertIn("systems, AI products, and research", updated)
+            self.assertNotIn("agents and product design.", updated)
 
 
 if __name__ == "__main__":

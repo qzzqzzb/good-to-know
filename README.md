@@ -2,16 +2,24 @@
 
 # GoodToKnow
 
-**A local-first recommendation agent that senses broadly, surfaces what you should know now, and co-evolves with the user over time.**
+**A local-first discovery agent that uses your current work context to surface a short briefing of what you should know now, and co-evolves with you over time.**
 
 [![macOS](https://img.shields.io/badge/platform-macOS-black)](#quick-start)
 [![Local First](https://img.shields.io/badge/local--first-yes-2f855a)](#what-is-goodtoknow)
 [![Codex Runtime](https://img.shields.io/badge/runtime-Codex-412991)](#how-it-works)
 [![Notion Output](https://img.shields.io/badge/output-Notion-111111)](#configuration)
 
-<img src="assets/main.jpg" alt="GoodToKnow preview" width="860" />
+<img src="assets/GTN.png" alt="GoodToKnow preview" width="860" />
 
 </div>
+
+## In 10 Seconds
+
+GoodToKnow is for people who keep feeling, "I probably missed something useful adjacent to what I'm doing right now."
+
+It runs locally, reads signals from your current work, uses Codex with web search to look outward, and produces a small ranked briefing instead of another infinite feed.
+
+Think of it as a quiet research scout for your real work.
 
 ## Install In One Line
 
@@ -26,6 +34,8 @@ This installs a local `gtn` command and sets up a user-scoped runtime under `~/.
 GoodToKnow is for people who suspect they are missing useful things — tools, papers, updates, ideas, or opportunities adjacent to what they are already doing — but do not want another noisy feed.
 
 It runs quietly in the background, uses your local context to look outward, and surfaces a small number of things that are actually worth your attention.
+
+It collects local signals such as browser history and agent work episodes, which helps filter what gets surfaced.
 
 Why people might want it:
 
@@ -105,7 +115,7 @@ GoodToKnow currently runs as a layered local system:
 1. `context`
    - collects local signals such as browser history and agent work episodes
 2. `memory`
-   - stores normalized user context, findings, and feedback signals in simple local files
+   - stores normalized user context, findings, and feedback signals in a local memory runtime
 3. `discovery`
    - uses Codex with web search to look outward based on current memory
 4. `runtime`
@@ -118,7 +128,7 @@ The active stack is selected by `bootstrap/stack.yaml`.
 The current default stack uses:
 
 - `context/naive-context`
-- `memory/naive-memory`
+- `memory/mempalace-memory`
 - `discovery/web-discovery`
 - `runtime/codex-agent-loop`
 - `output/notion-briefing`

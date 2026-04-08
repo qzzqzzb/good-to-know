@@ -24,30 +24,37 @@ class BuildBriefingRunIdTests(unittest.TestCase):
     def test_build_briefing_accepts_explicit_run_id_and_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            findings = tmp_path / "findings.md"
+            findings = tmp_path / "findings.json"
+            wakeup = tmp_path / "memory-wakeup.txt"
             findings.write_text(
-                "# External Findings Memory\n\n"
-                "## x\n"
-                "- dedup_key: x\n"
-                "- time: 2026-04-07T00:00:00+08:00\n"
-                "- source: web_search\n"
-                "- type: finding\n"
-                "- title: Example\n"
-                "- tags: [test]\n"
-                "- score: 7\n"
-                "- summary: Summary\n"
-                "- why_recommended: Why\n"
-                "- digest: >\n"
-                "  Digest\n"
-                "- raw: https://example.com\n",
+                json.dumps(
+                    [
+                        {
+                            "entry_id": "x",
+                            "dedup_key": "x",
+                            "time": "2026-04-07T00:00:00+08:00",
+                            "source": "web_search",
+                            "title": "Example",
+                            "tags": ["test"],
+                            "score": 7,
+                            "summary": "Summary",
+                            "why_recommended": "Why",
+                            "digest": "Digest",
+                            "raw": "https://example.com",
+                        }
+                    ]
+                ),
                 encoding="utf-8",
             )
+            wakeup.write_text("Wake-up text\n", encoding="utf-8")
             run_dir = tmp_path / "custom-run"
             subprocess.run(
                 [
                     sys.executable,
                     "runtime/codex-agent-loop/scripts/build_briefing.py",
                     str(findings),
+                    "--wakeup-path",
+                    str(wakeup),
                     "--run-id",
                     "run-123",
                     "--run-dir",
@@ -57,6 +64,7 @@ class BuildBriefingRunIdTests(unittest.TestCase):
             )
             payload = json.loads((run_dir / "briefing.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["run_id"], "run-123")
+            self.assertEqual(payload["memory_wakeup"], "Wake-up text\n")
 
     def test_stack_run_output_dir_honors_stack_value(self) -> None:
         stack = {"run_output_dir": "custom-runs"}

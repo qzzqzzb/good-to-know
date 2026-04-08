@@ -102,7 +102,7 @@ EOF
 fi
 
 if [[ -n "$USER_PROFILE" ]]; then
-  "$VENV_PYTHON" "$RUNTIME_REPO/memory/naive-memory/scripts/record_user_profile.py" "$USER_PROFILE"
+  "$VENV_PYTHON" "$RUNTIME_REPO/memory/mempalace-memory/scripts/record_user_profile.py" "$USER_PROFILE"
 fi
 
 echo "GTN installed. Runtime repo: $RUNTIME_REPO"

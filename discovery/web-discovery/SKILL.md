@@ -23,7 +23,7 @@ That flag enables the native Responses `web_search` tool for the model. If the s
 
 ## How to use
 1. Read the active memory skill first.
-2. Read recent entries from `memory/naive-memory/user_context.md` or the currently active memory skill’s equivalent.
+2. Read recent entries from the currently active memory skill’s exported or readable context surface.
 3. Read `discovery/web-discovery/references/query-planning.md` and derive a small set of search directions from recent context.
 4. Use Codex native web search and browsing to search, open pages, and inspect promising results.
 5. For each result worth remembering, run `python3 discovery/web-discovery/scripts/make_finding_id.py <url>`.

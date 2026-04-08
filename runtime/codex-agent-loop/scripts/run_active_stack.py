@@ -109,12 +109,45 @@ def run_feedback_phase(stack: dict) -> None:
         run_python(ingest_context, str(feedback_outbox))
 
 
+def build_memory_artifacts(stack: dict, run_dir: Path) -> dict[str, Path]:
+    memory_skill = ensure_skill_path(str(stack["memory_skill"]))
+    read_wakeup = memory_skill / "scripts" / "read_wakeup.py"
+    export_findings = memory_skill / "scripts" / "export_findings.py"
+    status_script = memory_skill / "scripts" / "status.py"
+
+    wakeup_path = run_dir / "memory-wakeup.txt"
+    findings_path = run_dir / "memory-findings.json"
+    run_python(read_wakeup, "--output", str(wakeup_path))
+    run_python(export_findings, "--output", str(findings_path))
+
+    artifacts = {
+        "wakeup": wakeup_path,
+        "findings": findings_path,
+    }
+    if status_script.exists():
+        status_path = run_dir / "memory-status.json"
+        run_python(status_script, "--output", str(status_path))
+        artifacts["status"] = status_path
+
+    return artifacts
+
+
 def build_outputs(stack: dict, run_id: str | None = None, run_dir: Path | None = None) -> Path:
     build_briefing = RUNTIME_DIR / "scripts" / "build_briefing.py"
     repo_run_id, repo_run_dir = resolve_run_dir(stack, run_id=run_id, explicit_run_dir=run_dir)
     repo_run_dir.mkdir(parents=True, exist_ok=True)
+    memory_artifacts = build_memory_artifacts(stack, repo_run_dir)
 
-    run_python(build_briefing, "--run-id", repo_run_id, "--run-dir", str(repo_run_dir))
+    run_python(
+        build_briefing,
+        str(memory_artifacts["findings"]),
+        "--wakeup-path",
+        str(memory_artifacts["wakeup"]),
+        "--run-id",
+        repo_run_id,
+        "--run-dir",
+        str(repo_run_dir),
+    )
 
     briefing_path = repo_run_dir / "briefing.json"
     for relative in stack.get("output_skills", []):
