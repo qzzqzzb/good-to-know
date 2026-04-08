@@ -35,6 +35,8 @@ GoodToKnow is for people who suspect they are missing useful things — tools, p
 
 It runs quietly in the background, uses your local context to look outward, and surfaces a small number of things that are actually worth your attention.
 
+It collects local signals such as browser history and agent work episodes, which helps filter what gets surfaced.
+
 Why people might want it:
 
 - **Quiet by default**  
