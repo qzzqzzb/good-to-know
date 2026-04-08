@@ -291,6 +291,18 @@ def build_wakeup_text(wing: str | None = None) -> str:
     return text
 
 
+def build_recall_text(wing: str | None = None, room: str | None = None, n_results: int = 10) -> str:
+    stack = upstream_memory_stack()
+    return stack.recall(wing=wing, room=room, n_results=n_results)
+
+
+def build_search_text(
+    query: str, wing: str | None = None, room: str | None = None, n_results: int = 5
+) -> str:
+    stack = upstream_memory_stack()
+    return stack.search(query=query, wing=wing, room=room, n_results=n_results)
+
+
 def export_findings_payload() -> list[dict[str, object]]:
     payload: list[dict[str, object]] = []
     for record in list_records(bucket="findings"):
