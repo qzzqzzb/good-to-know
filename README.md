@@ -105,7 +105,7 @@ GoodToKnow currently runs as a layered local system:
 1. `context`
    - collects local signals such as browser history and agent work episodes
 2. `memory`
-   - stores normalized user context, findings, and feedback signals in simple local files
+   - stores normalized user context, findings, and feedback signals in a local memory runtime
 3. `discovery`
    - uses Codex with web search to look outward based on current memory
 4. `runtime`
@@ -118,7 +118,7 @@ The active stack is selected by `bootstrap/stack.yaml`.
 The current default stack uses:
 
 - `context/naive-context`
-- `memory/naive-memory`
+- `memory/mempalace-memory`
 - `discovery/web-discovery`
 - `runtime/codex-agent-loop`
 - `output/notion-briefing`

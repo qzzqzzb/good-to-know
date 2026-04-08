@@ -1,5 +1,5 @@
 runtime_skill: runtime/codex-agent-loop
-memory_skill: memory/naive-memory
+memory_skill: memory/mempalace-memory
 context_skills:
   - context/naive-context
 discovery_skills:

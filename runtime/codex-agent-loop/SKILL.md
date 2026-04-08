@@ -72,7 +72,7 @@ Use the active discovery skill's local protocol as the source of truth for the e
 - The user does not manually run module commands; Codex uses this skill as the main entrypoint.
 - Native web discovery requires starting Codex with `--search`.
 - Use `runtime/codex-agent-loop/references/briefing-schema.md` as the output contract for recommendation artifacts.
-- Use `python3 runtime/codex-agent-loop/scripts/build_briefing.py` to turn stored findings into `briefing.json` and `briefing.md`.
+- Use `python3 runtime/codex-agent-loop/scripts/build_briefing.py <memory-findings.json>` to turn exported findings into `briefing.json` and `briefing.md`.
 - Use `python3 runtime/codex-agent-loop/scripts/run_active_stack.py` to bundle the deterministic local parts of the stack into one Codex-owned step.
 - Runtime helpers should accept explicit `--run-id` / `--run-dir` when a product shell allocates run identity first.
 - Bootstrap selects active skills but does not define their internal behavior.

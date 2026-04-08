@@ -9,7 +9,7 @@ description = "GoodToKnow local product shell"
 readme = "AGENTS.md"
 requires-python = ">=3.10"
 authors = [{name = "GoodToKnow"}]
-dependencies = []
+dependencies = ["chromadb>=0.5,<0.7"]
 
 [project.scripts]
 gtn = "runtime.gtn_local_product.cli:main"

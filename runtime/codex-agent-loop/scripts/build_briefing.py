@@ -9,7 +9,6 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 RUNTIME_DIR = SCRIPT_DIR.parent
 REPO_ROOT = RUNTIME_DIR.parent.parent
-DEFAULT_FINDINGS_PATH = REPO_ROOT / "memory" / "naive-memory" / "external_findings.md"
 DEFAULT_RUNS_DIR = REPO_ROOT / "runs"
 ENTRY_PATTERN = re.compile(r"^##\s+(.+)$", re.MULTILINE)
 
@@ -89,6 +88,14 @@ def parse_block(entry_id: str, block: str) -> dict:
 
 
 def load_findings(path: Path) -> list[dict]:
+    if path.suffix.lower() == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, list):
+            records = payload
+        else:
+            records = payload.get("items", [])
+        return [dict(record) for record in records]
+
     text = path.read_text(encoding="utf-8")
     records = []
     for entry_id, block in split_entries(text):
@@ -128,7 +135,7 @@ def _parse_iso_datetime(value: str) -> datetime | None:
         return None
 
 
-def build_briefing_payload(findings: list[dict], run_id: str) -> dict:
+def build_briefing_payload(findings: list[dict], run_id: str, wakeup_text: str = "") -> dict:
     generated_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
     items = []
     missing_score_items: list[str] = []
@@ -161,6 +168,7 @@ def build_briefing_payload(findings: list[dict], run_id: str) -> dict:
     return {
         "run_id": run_id,
         "generated_at": generated_at,
+        "memory_wakeup": wakeup_text,
         "warnings": {
             "missing_score_entry_ids": missing_score_items,
         },
@@ -240,8 +248,7 @@ def main() -> None:
     parser.add_argument(
         "findings_path",
         nargs="?",
-        default=str(DEFAULT_FINDINGS_PATH),
-        help="Path to findings markdown. Defaults to memory/naive-memory/external_findings.md",
+        help="Path to findings input. Supports legacy markdown and JSON exports from the active memory module.",
     )
     parser.add_argument(
         "--output-dir",
@@ -250,10 +257,16 @@ def main() -> None:
     )
     parser.add_argument("--run-id", help="Optional explicit run id to reuse for artifact generation")
     parser.add_argument("--run-dir", help="Optional explicit run directory to write into")
+    parser.add_argument("--wakeup-path", help="Optional path to session-start wake-up text")
     parser.add_argument("--result-path", help="Optional structured result JSON output path")
     args = parser.parse_args()
 
-    findings_path = Path(args.findings_path).resolve()
+    if args.findings_path:
+        findings_path = Path(args.findings_path).resolve()
+    elif args.run_dir:
+        findings_path = Path(args.run_dir).resolve() / "memory-findings.json"
+    else:
+        raise SystemExit("Findings input not provided. Pass a findings path or use --run-dir with memory-findings.json present.")
     if not findings_path.exists():
         raise SystemExit(f"Findings not found: {findings_path}")
 
@@ -264,7 +277,14 @@ def main() -> None:
     )
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    payload = build_briefing_payload(load_findings(findings_path), run_id)
+    wakeup_text = ""
+    if args.wakeup_path:
+        wakeup_path = Path(args.wakeup_path).resolve()
+        if not wakeup_path.exists():
+            raise SystemExit(f"Wake-up text not found: {wakeup_path}")
+        wakeup_text = wakeup_path.read_text(encoding="utf-8")
+
+    payload = build_briefing_payload(load_findings(findings_path), run_id, wakeup_text=wakeup_text)
 
     missing_score_items = payload.get("warnings", {}).get("missing_score_entry_ids", [])
     if missing_score_items:
