@@ -2,7 +2,7 @@
 
 # GoodToKnow
 
-**A local-first recommendation agent that senses broadly, surfaces what you should know now, and co-evolves with the user over time.**
+**A local-first discovery agent that uses your current work context to surface a short briefing of what you should know now, and co-evolves with you over time.**
 
 [![macOS](https://img.shields.io/badge/platform-macOS-black)](#quick-start)
 [![Local First](https://img.shields.io/badge/local--first-yes-2f855a)](#what-is-goodtoknow)
@@ -12,6 +12,14 @@
 <img src="assets/GTN.png" alt="GoodToKnow preview" width="860" />
 
 </div>
+
+## In 10 Seconds
+
+GoodToKnow is for people who keep feeling, "I probably missed something useful adjacent to what I'm doing right now."
+
+It runs locally, reads signals from your current work, uses Codex with web search to look outward, and produces a small ranked briefing instead of another infinite feed.
+
+Think of it as a quiet research scout for your real work.
 
 ## Install In One Line
 
