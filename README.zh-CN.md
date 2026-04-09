@@ -138,6 +138,113 @@ GoodToKnow 当前是一个分层的本地系统：
 - `runtime/codex-agent-loop`
 - `output/notion-briefing`
 
+## GTN 目前会扫描哪些用户上下文
+
+当前默认的 context stack 是刻意做窄、并且偏本地优先的。GTN 并不会尝试“把你机器上的一切都读一遍”。默认实现目前只读取少量、和“你最近在做什么”强相关的本地信号。
+
+### 1. 最近的浏览器历史
+
+只要本地历史数据库存在，GTN 目前会读取这些浏览器的最近访问记录：
+
+- Chrome
+- Edge
+- Brave
+- Firefox
+
+它从浏览器历史里提取的信息主要是：
+
+- 页面 URL
+- 页面标题（如果有）
+- 最近访问时间
+- 浏览器来源（`chrome`、`edge`、`brave`、`firefox`）
+
+在写入 memory 之前，GTN 会先做一层规范化：
+
+- 忽略浏览器内部页面，例如 `chrome://`、`edge://`、`brave://`、`about:`、`file://`
+- 只保留普通的 `http` / `https` 页面
+- 去掉常见追踪参数，例如 `utm_*`、`fbclid`、`gclid` 等
+- 按“浏览器 + 规范化 URL”去重，只保留最近一次访问
+- 最终转换成紧凑的 `user_signal` 观察项，而不是把原始数据库记录整块塞进 memory
+
+默认浏览器历史采集范围：
+
+- 回看窗口：最近 72 小时
+- 每次采集最多保留：20 条观察
+
+一个重要限制：
+
+- GTN 目前把浏览器历史当作“你最近碰过什么网页”的信号
+- 它**不会**直接从浏览器历史数据库里提取完整网页正文
+
+### 2. 最近的 coding-agent 会话活动
+
+GTN 还会读取本地 coding agent 的最近会话日志，目前包括：
+
+- `~/.codex/sessions` 下的 Codex 会话日志
+- `~/.claude/projects` 和 `~/.claude_bak/projects` 下的 Claude 会话日志
+
+目标不是把整段对话全文塞进 memory，而是提取“发生过哪些具体工作片段”的紧凑观察。
+
+对 Codex，会重点识别：
+
+- 高信号的用户请求
+- `apply_patch` 类型的编辑
+- 具有写入性质的 `exec_command`，比如文件重定向、写文件、移动文件、`mkdir`、`touch` 等
+
+对 Claude，会重点识别：
+
+- 高信号的用户请求
+- `Write`、`Edit`、`MultiEdit` 这类写文件工具
+- 具有写入性质的 `Bash` 命令
+
+GTN 如何把 agent 历史转成上下文：
+
+- 优先保留“编辑片段（edit episodes）”，而不是整场 session 的笼统摘要
+- 一场很长的 session，如果明显分成多个实现片段，可能会拆成多条观察
+- 每条观察会尽量保留：
+  - 来源 agent（`codex` 或 `claude`）
+  - 所在工作目录 / cwd
+  - 能推断出的被修改文件或目标路径
+  - 一个基于用户请求生成的简短锚点摘要
+
+默认 agent 会话采集范围：
+
+- 回看窗口：最近 168 小时
+- 每次采集最多保留：16 条观察
+- 每个 session 最多保留：3 条观察
+- Codex subagent session：默认不纳入
+- 非编辑型 session：如果没有明确编辑片段，默认仍可保留为简短摘要
+
+一个重要限制：
+
+- 当前 agent-session ingest 是刻意做“有损压缩”的
+- 它保留的是工作片段摘要，不是完整 transcript 回放
+
+### 3. 这些上下文最终会流向哪里
+
+默认 context skill 会先把规范化后的观察写到：
+
+- `context/naive-context/outbox.md`
+
+然后再由当前 memory 层 ingest 进去。它会影响的主要是：
+
+- GTN 下一轮向外搜索什么主题
+- 哪些发现更像“和你现在相关”
+- 最终 briefing 的排序优先级
+
+### 4. 默认情况下，GTN 目前**不会**扫描什么
+
+在当前默认 stack 里，GTN **不会**去广泛扫描你机器上的任意个人数据。比如，这个仓库的默认 context skill 目前不会默认 ingest：
+
+- 邮件
+- 聊天记录
+- 任意本地文档
+- 剪贴板历史
+- 通用意义上的终端滚动历史
+- 浏览器页面全文内容
+
+后面这些边界当然可能演进，但当前默认实现其实很克制：主要就是“最近浏览器历史 + 最近 coding-agent 工作历史”。
+
 ## 配置
 
 ### Notion 输出
