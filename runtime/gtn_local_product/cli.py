@@ -176,6 +176,33 @@ def restore_runtime_state_snapshots(runtime_repo: Path, snapshots: dict[str, byt
         file_path.write_bytes(content)
 
 
+def install_runtime_editable(runtime_repo: Path) -> None:
+    pip_command = [sys.executable, "-m", "pip", "install", "--editable", str(runtime_repo)]
+    pip_result = subprocess.run(pip_command, text=True, capture_output=True)
+    if pip_result.returncode == 0:
+        return
+
+    combined_output = f"{pip_result.stdout}\n{pip_result.stderr}"
+    if "No module named pip" in combined_output:
+        uv_bin = shutil.which("uv")
+        if uv_bin:
+            subprocess.run(
+                [uv_bin, "pip", "install", "--python", sys.executable, "--editable", str(runtime_repo)],
+                check=True,
+            )
+            return
+        subprocess.run([sys.executable, "-m", "ensurepip", "--upgrade"], check=True)
+        subprocess.run(pip_command, check=True)
+        return
+
+    raise subprocess.CalledProcessError(
+        pip_result.returncode,
+        pip_command,
+        output=pip_result.stdout,
+        stderr=pip_result.stderr,
+    )
+
+
 def cmd_update(args: argparse.Namespace) -> int:
     paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
     state = load_state(paths)
@@ -192,7 +219,7 @@ def cmd_update(args: argparse.Namespace) -> int:
 
     try:
         subprocess.run(["git", "-C", str(runtime_repo), "pull", "--ff-only"], check=True)
-        subprocess.run([sys.executable, "-m", "pip", "install", "--editable", str(runtime_repo)], check=True)
+        install_runtime_editable(runtime_repo)
     finally:
         restore_runtime_state_snapshots(runtime_repo, snapshots)
 
