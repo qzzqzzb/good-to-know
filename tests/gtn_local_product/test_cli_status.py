@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -14,6 +15,63 @@ from runtime.gtn_local_product.runner import exit_code_for_state
 
 
 class StatusTests(unittest.TestCase):
+    @staticmethod
+    def _git(*args: str, cwd: Path | None = None) -> None:
+        subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)
+
+    def _seed_runtime_origin(self, tmp: Path) -> tuple[Path, Path]:
+        origin = tmp / "origin.git"
+        seed = tmp / "seed"
+        self._git("git", "init", "--bare", str(origin))
+        self._git("git", "clone", str(origin), str(seed))
+        self._git("git", "-C", str(seed), "checkout", "-b", "main")
+        for rel_path, content in {
+            "bootstrap/stack.yaml": "run_output_dir: runs\n",
+            "context/naive-context/outbox.md": "# Naive Context Outbox\n",
+            "discovery/web-discovery/outbox.md": "# Web Discovery Outbox\n",
+            "memory/naive-memory/external_findings.md": "# External Findings\n",
+            "memory/naive-memory/user_context.md": "# User Context\n",
+            "output/notion-briefing/page_index.json": "{\n  \"pages\": {}\n}\n",
+            "output/notion-briefing/settings.json": "{\n  \"parent_page_url\": \"\"\n}\n",
+            "README.md": "seed\n",
+        }.items():
+            path = seed / rel_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        self._git("git", "-C", str(seed), "add", ".")
+        self._git(
+            "git",
+            "-C",
+            str(seed),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "seed",
+        )
+        self._git("git", "-C", str(seed), "push", "-u", "origin", "main")
+        return origin, seed
+
+    def _clone_runtime_repo(self, tmp: Path, origin: Path) -> Path:
+        runtime_repo = tmp / "runtime" / "GoodToKnow"
+        self._git("git", "clone", str(origin), str(runtime_repo))
+        self._git("git", "-C", str(runtime_repo), "checkout", "main")
+        return runtime_repo
+
+    def _write_state(self, root: Path, runtime_repo: Path) -> None:
+        (root / "state.json").write_text(
+            json.dumps(
+                {
+                    "runtime_repo_path": str(runtime_repo),
+                    "codex_path": "/usr/local/bin/codex",
+                    "launch_agent_path": str(root / "com.goodtoknow.gtn.plist"),
+                }
+            ),
+            encoding="utf-8",
+        )
+
     def test_status_reports_basic_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -69,6 +127,68 @@ class StatusTests(unittest.TestCase):
             with patch.object(cli, "lock_status", return_value="active"):
                 with self.assertRaises(SystemExit):
                     cli.main(["--root", str(root), "update"])
+
+    def test_update_preserves_local_runtime_state_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            root = tmp_path / ".gtn"
+            root.mkdir(parents=True, exist_ok=True)
+            origin, seed = self._seed_runtime_origin(tmp_path)
+            runtime_repo = self._clone_runtime_repo(tmp_path, origin)
+            self._write_state(root, runtime_repo)
+
+            tracked_state = runtime_repo / "output" / "notion-briefing" / "settings.json"
+            tracked_state.write_text("{\n  \"parent_page_url\": \"https://notion.local/page\"\n}\n", encoding="utf-8")
+
+            (seed / "README.md").write_text("updated upstream\n", encoding="utf-8")
+            self._git(
+                "git",
+                "-C",
+                str(seed),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-am",
+                "upstream",
+            )
+            self._git("git", "-C", str(seed), "push", "origin", "main")
+
+            real_run = subprocess.run
+
+            def wrapped_run(*args, **kwargs):
+                cmd = args[0]
+                if cmd[:3] == [cli.sys.executable, "-m", "pip"]:
+                    return subprocess.CompletedProcess(cmd, 0)
+                return real_run(*args, **kwargs)
+
+            with patch.object(cli.subprocess, "run", side_effect=wrapped_run):
+                rc = cli.main(["--root", str(root), "update"])
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(
+                tracked_state.read_text(encoding="utf-8"),
+                "{\n  \"parent_page_url\": \"https://notion.local/page\"\n}\n",
+            )
+            self.assertEqual((runtime_repo / "README.md").read_text(encoding="utf-8"), "updated upstream\n")
+
+    def test_update_rejects_non_runtime_state_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            root = tmp_path / ".gtn"
+            root.mkdir(parents=True, exist_ok=True)
+            origin, _seed = self._seed_runtime_origin(tmp_path)
+            runtime_repo = self._clone_runtime_repo(tmp_path, origin)
+            self._write_state(root, runtime_repo)
+
+            (runtime_repo / "README.md").write_text("local edit\n", encoding="utf-8")
+
+            with self.assertRaises(SystemExit) as error:
+                cli.main(["--root", str(root), "update"])
+
+            self.assertIn("non-runtime state files", str(error.exception))
+            self.assertEqual((runtime_repo / "README.md").read_text(encoding="utf-8"), "local edit\n")
 
     def test_uninstall_removes_root_and_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

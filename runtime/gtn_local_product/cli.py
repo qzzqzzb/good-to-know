@@ -16,6 +16,20 @@ from .paths import GTNPaths, ensure_directories, resolve_paths
 from .runner import resolve_codex_executable, run_once
 from .storage import load_json, save_json
 
+PRESERVED_RUNTIME_STATE_PATHS = frozenset(
+    {
+        "context/naive-context/outbox.md",
+        "context/naive-context/settings.json",
+        "discovery/web-discovery/outbox.md",
+        "memory/mempalace-memory/identity.md",
+        "memory/naive-memory/external_findings.md",
+        "memory/naive-memory/user_context.md",
+        "output/notion-briefing/feedback_outbox.md",
+        "output/notion-briefing/page_index.json",
+        "output/notion-briefing/settings.json",
+    }
+)
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
@@ -110,6 +124,58 @@ def cmd_stop(args: argparse.Namespace) -> int:
     return 0
 
 
+def dirty_runtime_paths(runtime_repo: Path) -> set[str]:
+    result = subprocess.run(
+        ["git", "-C", str(runtime_repo), "status", "--short", "--untracked-files=no"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    paths: set[str] = set()
+    for line in result.stdout.splitlines():
+        if not line:
+            continue
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        paths.add(path)
+    return paths
+
+
+def snapshot_preserved_runtime_state(runtime_repo: Path, dirty_paths: set[str]) -> dict[str, bytes | None]:
+    unsupported = sorted(path for path in dirty_paths if path not in PRESERVED_RUNTIME_STATE_PATHS)
+    if unsupported:
+        formatted = "\n".join(f"  - {path}" for path in unsupported)
+        raise SystemExit(
+            "Cannot update while non-runtime state files have local changes.\n"
+            "Commit or stash these files and retry:\n"
+            f"{formatted}"
+        )
+
+    snapshots: dict[str, bytes | None] = {}
+    for rel_path in sorted(dirty_paths):
+        file_path = runtime_repo / rel_path
+        snapshots[rel_path] = file_path.read_bytes() if file_path.exists() else None
+    return snapshots
+
+
+def reset_runtime_paths_to_head(runtime_repo: Path, rel_paths: list[str]) -> None:
+    if not rel_paths:
+        return
+    subprocess.run(["git", "-C", str(runtime_repo), "checkout", "HEAD", "--", *rel_paths], check=True)
+
+
+def restore_runtime_state_snapshots(runtime_repo: Path, snapshots: dict[str, bytes | None]) -> None:
+    for rel_path, content in snapshots.items():
+        file_path = runtime_repo / rel_path
+        if content is None:
+            if file_path.exists():
+                file_path.unlink()
+            continue
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(content)
+
+
 def cmd_update(args: argparse.Namespace) -> int:
     paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
     state = load_state(paths)
@@ -120,8 +186,18 @@ def cmd_update(args: argparse.Namespace) -> int:
         run_id = lock.get("run_id", "(unknown)")
         raise SystemExit(f"Cannot update while a GTN run is active (run_id={run_id}).")
 
-    subprocess.run(["git", "-C", str(runtime_repo), "pull", "--ff-only"], check=True)
-    subprocess.run([sys.executable, "-m", "pip", "install", "--editable", str(runtime_repo)], check=True)
+    dirty_paths = dirty_runtime_paths(runtime_repo)
+    snapshots = snapshot_preserved_runtime_state(runtime_repo, dirty_paths)
+    reset_runtime_paths_to_head(runtime_repo, sorted(snapshots))
+
+    try:
+        subprocess.run(["git", "-C", str(runtime_repo), "pull", "--ff-only"], check=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "--editable", str(runtime_repo)], check=True)
+    finally:
+        restore_runtime_state_snapshots(runtime_repo, snapshots)
+
+    if snapshots:
+        print(f"Preserved local GTN state for {len(snapshots)} file(s).")
     print(f"Updated GTN runtime at {runtime_repo}")
     return 0
 
