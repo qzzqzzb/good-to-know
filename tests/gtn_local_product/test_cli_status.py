@@ -173,6 +173,63 @@ class StatusTests(unittest.TestCase):
             )
             self.assertEqual((runtime_repo / "README.md").read_text(encoding="utf-8"), "updated upstream\n")
 
+    def test_update_falls_back_to_uv_when_pip_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            root = tmp_path / ".gtn"
+            root.mkdir(parents=True, exist_ok=True)
+            origin, seed = self._seed_runtime_origin(tmp_path)
+            runtime_repo = self._clone_runtime_repo(tmp_path, origin)
+            self._write_state(root, runtime_repo)
+
+            (seed / "README.md").write_text("uv-fallback\n", encoding="utf-8")
+            self._git(
+                "git",
+                "-C",
+                str(seed),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-am",
+                "upstream",
+            )
+            self._git("git", "-C", str(seed), "push", "origin", "main")
+
+            real_run = subprocess.run
+            seen_commands: list[list[str]] = []
+
+            def wrapped_run(*args, **kwargs):
+                cmd = args[0]
+                seen_commands.append(list(cmd))
+                if cmd[:3] == [cli.sys.executable, "-m", "pip"]:
+                    return subprocess.CompletedProcess(cmd, 1, "", "No module named pip")
+                if cmd[:2] == ["/fake/uv", "pip"]:
+                    return subprocess.CompletedProcess(cmd, 0, "", "")
+                return real_run(*args, **kwargs)
+
+            with (
+                patch.object(cli.shutil, "which", side_effect=lambda name: "/fake/uv" if name == "uv" else None),
+                patch.object(cli.subprocess, "run", side_effect=wrapped_run),
+            ):
+                rc = cli.main(["--root", str(root), "update"])
+
+            self.assertEqual(rc, 0)
+            self.assertEqual((runtime_repo / "README.md").read_text(encoding="utf-8"), "uv-fallback\n")
+            self.assertIn(
+                [
+                    "/fake/uv",
+                    "pip",
+                    "install",
+                    "--python",
+                    cli.sys.executable,
+                    "--editable",
+                    str(runtime_repo.resolve()),
+                ],
+                seen_commands,
+            )
+
     def test_update_rejects_non_runtime_state_changes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
