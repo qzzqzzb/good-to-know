@@ -4,6 +4,8 @@
 
 **A local-first discovery agent that uses your current work context to surface a short briefing of what you should know now, and co-evolves with you over time.**
 
+[中文说明](README.zh-CN.md)
+
 [![macOS](https://img.shields.io/badge/platform-macOS-black)](#quick-start)
 [![Local First](https://img.shields.io/badge/local--first-yes-2f855a)](#what-is-goodtoknow)
 [![Codex Runtime](https://img.shields.io/badge/runtime-Codex-412991)](#how-it-works)
