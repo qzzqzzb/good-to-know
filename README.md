@@ -37,6 +37,10 @@ It runs quietly in the background, uses your local context to look outward, and 
 
 It collects local signals such as browser history and agent work episodes, which helps filter what gets surfaced.
 
+<p align="center">
+  <img src="assets/concept.jpg" alt="GoodToKnow concept diagram" width="860" />
+</p>
+
 Why people might want it:
 
 - **Quiet by default**  
