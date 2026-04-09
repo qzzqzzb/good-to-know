@@ -24,6 +24,7 @@ PRESERVED_RUNTIME_STATE_PATHS = frozenset(
         "memory/mempalace-memory/identity.md",
         "memory/naive-memory/external_findings.md",
         "memory/naive-memory/user_context.md",
+        "output/feishu-briefing/settings.json",
         "output/notion-briefing/feedback_outbox.md",
         "output/notion-briefing/page_index.json",
         "output/notion-briefing/settings.json",

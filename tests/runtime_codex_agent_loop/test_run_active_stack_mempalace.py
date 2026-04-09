@@ -6,8 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-from tests.memory_mempalace.helpers import load_memory_module
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,34 +27,37 @@ run_active_stack = load_module(
 
 
 class RunActiveStackMempalaceTests(unittest.TestCase):
+    def _seed_memory_artifacts(self, run_dir: Path) -> dict[str, Path]:
+        wakeup_path = run_dir / "memory-wakeup.txt"
+        findings_path = run_dir / "memory-findings.json"
+        wakeup_text = "I build local-first AI tools.\nRuntime finding\n"
+        findings_payload = [
+            {
+                "entry_id": "finding-1",
+                "dedup_key": "finding:1",
+                "time": "2026-04-08T10:00:00+08:00",
+                "source": "web_search",
+                "title": "Runtime finding",
+                "tags": ["memory"],
+                "score": 9,
+                "summary": "Runtime summary.",
+                "why_recommended": "Needed for wake-up quality.",
+                "digest": "Runtime digest.",
+                "raw": "https://example.com/runtime",
+            }
+        ]
+        wakeup_path.write_text(wakeup_text, encoding="utf-8")
+        findings_path.write_text(json.dumps(findings_payload), encoding="utf-8")
+        return {"wakeup": wakeup_path, "findings": findings_path}
+
     def test_build_outputs_writes_and_uses_memory_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            memory_module = load_memory_module(tmp_path, name="mempalace_memory_runtime")
-            findings_outbox = tmp_path / "findings-outbox.md"
-            findings_outbox.write_text(
-                "## finding-1\n"
-                "- dedup_key: finding:1\n"
-                "- time: 2026-04-08T10:00:00+08:00\n"
-                "- source: web_search\n"
-                "- type: finding\n"
-                "- title: Runtime finding\n"
-                "- tags: [memory]\n"
-                "- score: 9\n"
-                "- summary: Runtime summary.\n"
-                "- why_recommended: >\n"
-                "  Needed for wake-up quality.\n"
-                "- digest: >\n"
-                "  Runtime digest.\n"
-                "- raw: https://example.com/runtime\n",
-                encoding="utf-8",
-            )
-            memory_module.record_user_profile("I build local-first AI tools.")
-            memory_module.ingest_outbox(findings_outbox, bucket="findings")
 
             run_dir = tmp_path / "run-123"
             stack = {"memory_skill": "memory/mempalace-memory", "output_skills": [], "run_output_dir": "runs"}
-            output_dir = run_active_stack.build_outputs(stack, run_id="run-123", run_dir=run_dir)
+            with patch.object(run_active_stack, "build_memory_artifacts", side_effect=lambda stack, dest: self._seed_memory_artifacts(dest)):
+                output_dir = run_active_stack.build_outputs(stack, run_id="run-123", run_dir=run_dir)
 
             self.assertEqual(output_dir.resolve(), run_dir.resolve())
             wakeup_path = run_dir / "memory-wakeup.txt"
@@ -76,6 +78,23 @@ class RunActiveStackMempalaceTests(unittest.TestCase):
             self.assertEqual(briefing_payload["run_id"], "run-123")
             self.assertEqual(briefing_payload["memory_wakeup"], wakeup_text)
             self.assertEqual(briefing_payload["items"][0]["title"], "Runtime finding")
+
+    def test_build_outputs_generates_payloads_for_multiple_output_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+
+            run_dir = tmp_path / "run-payloads"
+            stack = {
+                "memory_skill": "memory/mempalace-memory",
+                "output_skills": ["output/notion-briefing", "output/feishu-briefing"],
+                "run_output_dir": "runs",
+            }
+
+            with patch.object(run_active_stack, "build_memory_artifacts", side_effect=lambda stack, dest: self._seed_memory_artifacts(dest)):
+                run_active_stack.build_outputs(stack, run_id="run-payloads", run_dir=run_dir)
+
+            self.assertTrue((run_dir / "notion-payload.json").exists())
+            self.assertTrue((run_dir / "feishu-payload.json").exists())
 
 
 if __name__ == "__main__":

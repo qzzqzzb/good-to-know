@@ -24,7 +24,7 @@ Required outcomes:
 1. Run the deterministic pre-discovery phase first.
 2. Follow the active discovery skills from `bootstrap/stack.yaml` and use Codex web search when required by those skills.
 3. If the active output skill supports feedback collection, fetch feedback first, then sync/ingest it using that skill's own protocol.
-4. Run the deterministic post-discovery phase so `briefing.json`, `briefing.md`, and `notion-payload.json` end up under `{repo_run_dir}`.
+4. Run the deterministic post-discovery phase so `briefing.json`, `briefing.md`, and the active output payload artifacts (for example `notion-payload.json` and `feishu-payload.json`) end up under `{repo_run_dir}`.
 5. If the active output skill publishes to an external destination, preserve user feedback fields and write any skill-owned publish-result artifact that the output skill expects.
 6. If you can determine a machine-readable completion state, write a compact structured result file at `{result_path}`; otherwise leave that file for the outer product runner.
 

@@ -60,6 +60,17 @@ def ensure_skill_path(relative_path: str) -> Path:
     return skill_path
 
 
+def resolve_output_builder(skill_path: Path) -> Path | None:
+    candidates = (
+        skill_path / "scripts" / "build_payload.py",
+        skill_path / "scripts" / "build_notion_payload.py",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def stack_run_output_dir(stack: dict) -> Path:
     configured = str(stack.get("run_output_dir", "runs") or "runs")
     return (REPO_ROOT / configured).resolve()
@@ -152,8 +163,8 @@ def build_outputs(stack: dict, run_id: str | None = None, run_dir: Path | None =
     briefing_path = repo_run_dir / "briefing.json"
     for relative in stack.get("output_skills", []):
         skill_path = ensure_skill_path(str(relative))
-        build_payload = skill_path / "scripts" / "build_notion_payload.py"
-        if build_payload.exists():
+        build_payload = resolve_output_builder(skill_path)
+        if build_payload is not None:
             run_python(build_payload, str(briefing_path))
 
     return repo_run_dir

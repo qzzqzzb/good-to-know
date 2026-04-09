@@ -49,7 +49,7 @@ Use these helper commands inside Codex when it speeds up the loop:
 - `python3 runtime/codex-agent-loop/scripts/run_active_stack.py --stage post-discovery`
 
 The first refreshes context and ingests it into memory.
-The second ingests discovery outboxes, ingests any prepared feedback outboxes, builds `briefing.json` / `briefing.md`, and builds output payloads such as `notion-payload.json`.
+The second ingests discovery outboxes, ingests any prepared feedback outboxes, builds `briefing.json` / `briefing.md`, and builds active output payloads such as `notion-payload.json` or `feishu-payload.json`.
 
 If discovery outboxes are already ready, Codex may use:
 
