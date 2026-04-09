@@ -4,6 +4,8 @@
 
 **A local-first discovery agent that uses your current work context to surface a short briefing of what you should know now, and co-evolves with you over time.**
 
+[中文说明](README.zh-CN.md)
+
 [![macOS](https://img.shields.io/badge/platform-macOS-black)](#quick-start)
 [![Local First](https://img.shields.io/badge/local--first-yes-2f855a)](#what-is-goodtoknow)
 [![Codex Runtime](https://img.shields.io/badge/runtime-Codex-412991)](#how-it-works)
@@ -36,6 +38,10 @@ GoodToKnow is for people who suspect they are missing useful things — tools, p
 It runs quietly in the background, uses your local context to look outward, and surfaces a small number of things that are actually worth your attention.
 
 It collects local signals such as browser history and agent work episodes, which helps filter what gets surfaced.
+
+<p align="center">
+  <img src="assets/concept.jpg" alt="GoodToKnow concept diagram" width="860" />
+</p>
 
 Why people might want it:
 
