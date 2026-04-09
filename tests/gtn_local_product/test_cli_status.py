@@ -31,6 +31,7 @@ class StatusTests(unittest.TestCase):
             "discovery/web-discovery/outbox.md": "# Web Discovery Outbox\n",
             "memory/naive-memory/external_findings.md": "# External Findings\n",
             "memory/naive-memory/user_context.md": "# User Context\n",
+            "output/feishu-briefing/settings.json": "{\n  \"webhook_url\": \"\"\n}\n",
             "output/notion-briefing/page_index.json": "{\n  \"pages\": {}\n}\n",
             "output/notion-briefing/settings.json": "{\n  \"parent_page_url\": \"\"\n}\n",
             "README.md": "seed\n",
@@ -139,6 +140,8 @@ class StatusTests(unittest.TestCase):
 
             tracked_state = runtime_repo / "output" / "notion-briefing" / "settings.json"
             tracked_state.write_text("{\n  \"parent_page_url\": \"https://notion.local/page\"\n}\n", encoding="utf-8")
+            feishu_state = runtime_repo / "output" / "feishu-briefing" / "settings.json"
+            feishu_state.write_text("{\n  \"webhook_url\": \"https://open.feishu.cn/open-apis/bot/v2/hook/test\"\n}\n", encoding="utf-8")
 
             (seed / "README.md").write_text("updated upstream\n", encoding="utf-8")
             self._git(
@@ -170,6 +173,10 @@ class StatusTests(unittest.TestCase):
             self.assertEqual(
                 tracked_state.read_text(encoding="utf-8"),
                 "{\n  \"parent_page_url\": \"https://notion.local/page\"\n}\n",
+            )
+            self.assertEqual(
+                feishu_state.read_text(encoding="utf-8"),
+                "{\n  \"webhook_url\": \"https://open.feishu.cn/open-apis/bot/v2/hook/test\"\n}\n",
             )
             self.assertEqual((runtime_repo / "README.md").read_text(encoding="utf-8"), "updated upstream\n")
 

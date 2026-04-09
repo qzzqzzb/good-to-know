@@ -6,4 +6,5 @@ discovery_skills:
   - discovery/web-discovery
 output_skills:
   - output/notion-briefing
+  - output/feishu-briefing
 run_output_dir: runs
