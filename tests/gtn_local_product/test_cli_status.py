@@ -99,31 +99,144 @@ class StatusTests(unittest.TestCase):
             archive.add(source_root, arcname="good-to-know-main")
         return bundle_path
 
-    def test_status_reports_basic_fields(self) -> None:
+    def test_status_renders_dashboard_modules_and_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             root.mkdir(parents=True, exist_ok=True)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            self._seed_runtime_tree(runtime_repo)
+            (runtime_repo / "output" / "notion-briefing" / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "database_name": "GoodToKnow Recommendations",
+                        "database_url": "",
+                        "parent_page_url": "https://notion.local/page",
+                        "visible_properties": {"status": "Feedback"},
+                        "default_status": "No feedback",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (runtime_repo / "output" / "feishu-briefing" / "settings.json").write_text(
+                json.dumps({"webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook"}),
+                encoding="utf-8",
+            )
+            (runtime_repo / "output" / "notion-briefing" / "page_index.json").write_text(
+                json.dumps(
+                    {
+                        "default_status": "No feedback",
+                        "pages": {
+                            "a": {"last_seen_status": "No feedback"},
+                            "b": {"last_seen_status": "Good to know"},
+                            "c": {"last_seen_status": "Bad recommendation"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (runtime_repo / "memory" / "naive-memory" / "user_context.md").write_text(
+                "# User Context Memory\n\nAI agents and product design systems research.\n",
+                encoding="utf-8",
+            )
+            (runtime_repo / "context" / "naive-context" / "outbox.md").write_text(
+                "# Naive Context Outbox\n\nAgents agents product systems.\n",
+                encoding="utf-8",
+            )
+
             (root / "runs" / "run-1").mkdir(parents=True)
+            repo_run_dir = runtime_repo / "runs" / "run-1"
+            repo_run_dir.mkdir(parents=True, exist_ok=True)
+            (repo_run_dir / "memory-findings.json").write_text(
+                json.dumps(
+                    [
+                        {"source": "web_search", "summary": "one"},
+                        {"source": "web_search", "summary": "two"},
+                        {"source": "notion_feedback", "summary": "three"},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (repo_run_dir / "briefing.json").write_text(
+                json.dumps({"items": [{"title": "A"}, {"title": "B"}]}),
+                encoding="utf-8",
+            )
+            (repo_run_dir / "feishu-payload.json").write_text("{}", encoding="utf-8")
             (root / "state.json").write_text(json.dumps({
-                "runtime_repo_path": "/tmp/runtime",
+                "runtime_repo_path": str(runtime_repo),
                 "codex_path": "/usr/local/bin/codex",
                 "cadence": "1h",
                 "enabled": True,
                 "launch_agent_path": str(Path.home() / "Library/LaunchAgents/com.goodtoknow.gtn.plist"),
+                "initialized_at": "2026-04-07T10:00:00+08:00",
             }), encoding="utf-8")
             (root / "runs" / "run-1" / "result.json").write_text(json.dumps({
                 "state": "success",
                 "updated_at": "2026-04-07T11:00:00+08:00"
             }), encoding="utf-8")
+            (root / "runs" / "run-1" / "manifest.json").write_text(
+                json.dumps({"repo_run_dir": str(repo_run_dir)}),
+                encoding="utf-8",
+            )
+            (root / "status").mkdir(parents=True, exist_ok=True)
+            (root / "status" / "history.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "schema_started_at": "2026-04-07T11:00:00+08:00",
+                        "updated_at": "2026-04-07T11:00:00+08:00",
+                        "aggregated_run_ids": ["run-1"],
+                        "totals": {"push_count": 1, "pushed_recommendations_total": 2},
+                    }
+                ),
+                encoding="utf-8",
+            )
             buf = io.StringIO()
             with patch.object(cli, "launch_agent_loaded", return_value=True), redirect_stdout(buf):
                 rc = cli.main(["--root", str(root), "status"])
             output = buf.getvalue()
             self.assertEqual(rc, 0)
-            self.assertIn("enabled=True", output)
-            self.assertIn("cadence=1h", output)
-            self.assertIn("last_result=success", output)
-            self.assertIn("runtime_bundle_url=(unset)", output)
+            self.assertIn("GoodToKnow Dashboard", output)
+            self.assertIn("Last Run Status", output)
+            self.assertIn("All History", output)
+            self.assertIn("System Status", output)
+            self.assertIn("User Profile", output)
+            self.assertRegex(output, r"Records scanned\s+3")
+            self.assertIn("Webpages", output)
+            self.assertIn("searched", output)
+            self.assertRegex(output, r"searched\s+.*2|Webpages\s+.*2")
+            self.assertRegex(output, r"Recommendations\s+2")
+            self.assertRegex(output, r"Push count\s+1")
+            self.assertRegex(output, r"Good to know\s+.*1")
+            self.assertIn("notion.local", output)
+            self.assertIn("open.feishu", output)
+            self.assertIn("configured", output)
+            self.assertNotIn("test-hook", output)
+            self.assertRegex(output.lower(), r"agents?\s+3")
+
+    def test_status_shows_no_run_yet_when_no_run_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            self._seed_runtime_tree(runtime_repo)
+            (root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "runtime_repo_path": str(runtime_repo),
+                        "codex_path": "/usr/local/bin/codex",
+                        "cadence": "1h",
+                        "enabled": False,
+                        "launch_agent_path": str(Path.home() / "Library/LaunchAgents/com.goodtoknow.gtn.plist"),
+                        "initialized_at": "2026-04-07T10:00:00+08:00",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli.main(["--root", str(root), "status"])
+            output = buf.getvalue()
+            self.assertEqual(rc, 0)
+            self.assertIn("No run yet", output)
 
     def test_exit_code_for_failed_state_is_nonzero(self) -> None:
         self.assertEqual(exit_code_for_state(ResultState.SUCCESS), 0)

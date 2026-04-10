@@ -35,6 +35,7 @@ class StateData:
     enabled: bool = False
     launch_agent_label: str = "com.goodtoknow.gtn"
     launch_agent_path: str = ""
+    initialized_at: str = ""
 
 
 @dataclass

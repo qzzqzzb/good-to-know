@@ -13,12 +13,16 @@ from urllib.request import urlopen
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .cadence import next_run_epoch, parse_cadence
+from rich.console import Console
+
+from .cadence import parse_cadence
 from .launchd import launch_agent_loaded, load_launch_agent, unload_launch_agent, write_launch_agent
 from .locks import STALE_LOCK_SECONDS, lock_status, load_lock
 from .models import StateData
 from .paths import GTNPaths, ensure_directories, resolve_paths
 from .runner import resolve_codex_executable, run_once
+from .status_dashboard import build_status_dashboard, build_status_snapshot
+from .status_data import ensure_state_initialized_at
 from .storage import load_json, save_json
 
 DEFAULT_RUNTIME_BUNDLE_URL = "https://github.com/qzzqzzb/good-to-know/archive/refs/heads/main.tar.gz"
@@ -42,6 +46,7 @@ PRESERVED_RUNTIME_STATE_PATHS = frozenset(
 def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
+
 def load_state(paths: GTNPaths) -> StateData:
     raw = load_json(paths.state_file, {})
     if not raw:
@@ -50,7 +55,9 @@ def load_state(paths: GTNPaths) -> StateData:
         )
     return StateData(**raw)
 
+
 def save_state(paths: GTNPaths, state: StateData) -> None:
+    state = ensure_state_initialized_at(state)
     if not state.launch_agent_path:
         state.launch_agent_path = str(paths.launch_agent_path)
     save_json(paths.state_file, state)
@@ -398,49 +405,14 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     print("If the goodtoknow-gtn package is still installed, remove it with: uv pip uninstall goodtoknow-gtn")
     return 0
 
-def latest_result(paths: GTNPaths) -> tuple[dict | None, Path | None]:
-    runs = sorted([path for path in paths.runs_dir.iterdir() if path.is_dir()]) if paths.runs_dir.exists() else []
-    if not runs:
-        return None, None
-    latest = runs[-1]
-    result_path = latest / "result.json"
-    if not result_path.exists():
-        return None, latest
-    return json.loads(result_path.read_text(encoding="utf-8")), latest
-
 def cmd_status(args: argparse.Namespace) -> int:
     paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
     state = load_state(paths)
-    result, latest_run_dir = latest_result(paths)
-    cadence = state.cadence or "(unset)"
-    enabled = state.enabled and launch_agent_loaded()
-    lock = load_lock(paths.lock_file)
-    lock_state = lock_status(paths.lock_file)
-
-    next_run = None
-    if state.enabled and state.cadence:
-        _, seconds = parse_cadence(state.cadence)
-        last_epoch = None
-        if result and result.get("updated_at"):
-            last_epoch = datetime.fromisoformat(result["updated_at"].replace("Z", "+00:00")).timestamp()
-        estimate = next_run_epoch(last_epoch, seconds)
-        if estimate is not None:
-            next_run = datetime.fromtimestamp(estimate, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
-
-    print(f"enabled={enabled}")
-    print(f"cadence={cadence}")
-    print(f"runtime_repo={state.runtime_repo_path or '(unset)'}")
-    print(f"runtime_bundle_url={state.runtime_bundle_url or '(unset)'}")
-    print(f"launch_agent={paths.launch_agent_path}")
-    print(f"lock_state={lock_state}")
-    if lock:
-        print(f"lock_run_id={lock.get('run_id', '(unknown)')}")
-    if latest_run_dir:
-        print(f"last_run_dir={latest_run_dir}")
-    if result:
-        print(f"last_result={result.get('state', '(unknown)')}")
-        print(f"last_updated={result.get('updated_at', '(unknown)')}")
-    print(f"next_run={next_run or '(unknown)'}")
+    if not state.initialized_at:
+        state = ensure_state_initialized_at(state)
+        save_state(paths, state)
+    snapshot = build_status_snapshot(paths, state)
+    Console().print(build_status_dashboard(snapshot))
     print(f"stale_lock_seconds={STALE_LOCK_SECONDS}")
     return 0
 
