@@ -29,7 +29,7 @@ Think of it as a quiet research scout for your real work.
 curl -fsSL https://raw.githubusercontent.com/qzzqzzb/good-to-know/main/scripts/install_gtn.sh | bash
 ```
 
-This installs a local `gtn` command and sets up a user-scoped runtime under `~/.gtn`.
+This installs the published `goodtoknow-gtn` package into a local virtual environment, writes a local `gtn` wrapper, and initializes a user-scoped runtime under `~/.gtn`.
 
 ## What is GoodToKnow
 
@@ -67,7 +67,6 @@ Why people might want it:
 You currently need:
 
 - macOS
-- `git`
 - `uv`
 - `codex`
 - a working local Codex login/auth setup
@@ -102,16 +101,16 @@ Stop future scheduled runs:
 gtn stop
 ```
 
-Update the installed runtime:
+Upgrade GTN through PyPI:
 
 ```bash
-gtn update
+uv pip install --python ~/.gtn/.venv/bin/python --upgrade goodtoknow-gtn
 ```
 
-Remove the local product installation:
+If you want to remove the GTN package itself:
 
 ```bash
-gtn uninstall
+uv pip uninstall goodtoknow-gtn
 ```
 
 ## How It Works

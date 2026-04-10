@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from tests.memory_mempalace.helpers import load_memory_module
+MEMPALACE_AVAILABLE = importlib.util.find_spec("mempalace") is not None
 
 
+@unittest.skipUnless(MEMPALACE_AVAILABLE, "mempalace package is not installed in this test environment")
 class MemoryModuleTests(unittest.TestCase):
     def test_ingest_context_and_wakeup_from_empty_and_seeded_palace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

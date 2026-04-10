@@ -3,7 +3,7 @@
     "agent_sessions": {
       "enabled": true,
       "lookback_hours": 168,
-      "max_entries": 16,
+      "max_entries": 50,
       "max_observations_per_session": 3,
       "providers": ["codex", "claude"],
       "include_codex_subagents": false,
@@ -12,7 +12,7 @@
     "browser_history": {
       "enabled": true,
       "lookback_hours": 72,
-      "max_entries": 20,
+      "max_entries": 50,
       "browsers": ["chrome", "edge", "brave", "firefox"]
     }
   }

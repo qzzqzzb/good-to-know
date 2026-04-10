@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -12,8 +13,10 @@ ROOT = Path(__file__).resolve().parents[2]
 INGEST_FINDINGS = ROOT / "memory/mempalace-memory/scripts/ingest_findings.py"
 WAKEUP = ROOT / "memory/mempalace-memory/scripts/read_wakeup.py"
 STATUS = ROOT / "memory/mempalace-memory/scripts/status.py"
+MEMPALACE_AVAILABLE = importlib.util.find_spec("mempalace") is not None
 
 
+@unittest.skipUnless(MEMPALACE_AVAILABLE, "mempalace package is not installed in this test environment")
 class WakeupAndStatusTests(unittest.TestCase):
     def test_empty_wakeup_and_status_use_repo_local_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

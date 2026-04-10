@@ -29,11 +29,13 @@ class LockInfo:
 @dataclass
 class StateData:
     runtime_repo_path: str = ""
+    runtime_bundle_url: str = ""
     codex_path: str = ""
     cadence: str = ""
     enabled: bool = False
     launch_agent_label: str = "com.goodtoknow.gtn"
     launch_agent_path: str = ""
+    initialized_at: str = ""
 
 
 @dataclass

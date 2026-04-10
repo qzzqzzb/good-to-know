@@ -1,26 +1,37 @@
 from __future__ import annotations
 
 import argparse
+import importlib.resources as pkg_resources
 import json
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
+from urllib.parse import urlparse
+from urllib.request import urlopen
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .cadence import next_run_epoch, parse_cadence
+from rich.console import Console
+
+from .cadence import parse_cadence
 from .launchd import launch_agent_loaded, load_launch_agent, unload_launch_agent, write_launch_agent
 from .locks import STALE_LOCK_SECONDS, lock_status, load_lock
 from .models import StateData
 from .paths import GTNPaths, ensure_directories, resolve_paths
 from .runner import resolve_codex_executable, run_once
+from .status_dashboard import build_status_dashboard, build_status_snapshot
+from .status_data import ensure_state_initialized_at
 from .storage import load_json, save_json
 
+DEFAULT_RUNTIME_BUNDLE_URL = "https://github.com/qzzqzzb/good-to-know/archive/refs/heads/main.tar.gz"
 PRESERVED_RUNTIME_STATE_PATHS = frozenset(
     {
         "context/naive-context/outbox.md",
         "context/naive-context/settings.json",
         "discovery/web-discovery/outbox.md",
+        "memory/mempalace-memory/.data",
         "memory/mempalace-memory/identity.md",
         "memory/naive-memory/external_findings.md",
         "memory/naive-memory/user_context.md",
@@ -35,6 +46,7 @@ PRESERVED_RUNTIME_STATE_PATHS = frozenset(
 def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
+
 def load_state(paths: GTNPaths) -> StateData:
     raw = load_json(paths.state_file, {})
     if not raw:
@@ -43,10 +55,117 @@ def load_state(paths: GTNPaths) -> StateData:
         )
     return StateData(**raw)
 
+
 def save_state(paths: GTNPaths, state: StateData) -> None:
+    state = ensure_state_initialized_at(state)
     if not state.launch_agent_path:
         state.launch_agent_path = str(paths.launch_agent_path)
     save_json(paths.state_file, state)
+
+
+def resolve_runtime_bundle_url(explicit_url: str | None = None) -> str:
+    return explicit_url or DEFAULT_RUNTIME_BUNDLE_URL
+
+
+def runtime_uses_git_checkout(runtime_repo: Path) -> bool:
+    return (runtime_repo / ".git").exists()
+
+
+def copy_tree(source, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    for item in source.iterdir():
+        target = destination / item.name
+        if item.is_dir():
+            copy_tree(item, target)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(item.read_bytes())
+
+
+def is_mutable_runtime_path(relative_path: Path) -> bool:
+    rel = relative_path.as_posix()
+    return any(rel == prefix or rel.startswith(f"{prefix}/") for prefix in PRESERVED_RUNTIME_STATE_PATHS)
+
+
+def download_runtime_bundle(bundle_url: str, destination_dir: Path) -> Path:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    parsed = urlparse(bundle_url)
+    bundle_name = Path(parsed.path).name or "runtime-bundle.tar.gz"
+    bundle_path = destination_dir / bundle_name
+    with urlopen(bundle_url) as response:
+        bundle_path.write_bytes(response.read())
+    return bundle_path
+
+
+def extract_runtime_bundle(bundle_path: Path, destination_dir: Path) -> Path:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(bundle_path, "r:gz") as archive:
+        members = archive.getmembers()
+        archive.extractall(destination_dir)
+    top_level_dirs = {
+        member.name.split("/", 1)[0]
+        for member in members
+        if member.name and member.name.strip("/") and "/" in member.name
+    }
+    if len(top_level_dirs) == 1:
+        extracted_root = destination_dir / next(iter(top_level_dirs))
+    else:
+        extracted_root = destination_dir
+    if not (extracted_root / "bootstrap" / "stack.yaml").exists():
+        raise SystemExit(f"Runtime bundle did not contain a valid GTN runtime: {bundle_path}")
+    return extracted_root
+
+
+def hydrate_runtime_bundle(runtime_repo: Path, bundle_url: str) -> Path:
+    with tempfile.TemporaryDirectory(prefix="gtn-runtime-bundle-") as tmp:
+        tmp_path = Path(tmp)
+        bundle_path = download_runtime_bundle(bundle_url, tmp_path)
+        extracted_root = extract_runtime_bundle(bundle_path, tmp_path / "extract")
+        if runtime_repo.exists():
+            shutil.rmtree(runtime_repo)
+        runtime_repo.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(extracted_root, runtime_repo)
+    return runtime_repo.resolve()
+
+
+def hydrate_packaged_runtime(runtime_repo: Path) -> Path:
+    source_root = Path(str(pkg_resources.files("runtime.gtn_local_product").joinpath("resources/default_runtime")))
+    if not source_root.is_dir():
+        raise SystemExit("Installed GTN package does not contain the default runtime resources.")
+    if runtime_repo.exists():
+        shutil.rmtree(runtime_repo)
+    runtime_repo.parent.mkdir(parents=True, exist_ok=True)
+    runtime_repo.mkdir(parents=True, exist_ok=True)
+
+    # Mutable state/config files are copied into GTN_HOME; immutable defaults stay linked
+    # back to the installed package so the package remains the primary source of truth.
+    for source_path in sorted(source_root.rglob("*")):
+        relative = source_path.relative_to(source_root)
+        target = runtime_repo / relative
+        if source_path.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if is_mutable_runtime_path(relative):
+            target.write_bytes(source_path.read_bytes())
+        else:
+            target.symlink_to(source_path)
+
+    for relative in sorted(PRESERVED_RUNTIME_STATE_PATHS):
+        target = runtime_repo / relative
+        if "." not in Path(relative).name:
+            target.mkdir(parents=True, exist_ok=True)
+    return runtime_repo.resolve()
+
+
+def snapshot_runtime_state_files(runtime_repo: Path) -> dict[str, bytes | None]:
+    snapshots: dict[str, bytes | None] = {}
+    for rel_path in sorted(PRESERVED_RUNTIME_STATE_PATHS):
+        file_path = runtime_repo / rel_path
+        if not file_path.exists():
+            continue
+        snapshots[rel_path] = file_path.read_bytes()
+    return snapshots
 
 
 def require_initialized_runtime(state: StateData) -> Path:
@@ -76,18 +195,28 @@ def cmd_init(args: argparse.Namespace) -> int:
     paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
     ensure_directories(paths)
     codex_path = str(resolve_codex_executable(args.codex_path))
-    runtime_repo = Path(args.runtime_repo).expanduser().resolve()
-    if not runtime_repo.exists():
-        raise SystemExit(f"Runtime repo does not exist: {runtime_repo}")
-    if not (runtime_repo / "bootstrap" / "stack.yaml").exists():
-        raise SystemExit(f"Runtime repo does not look initialized: missing bootstrap/stack.yaml in {runtime_repo}")
+    runtime_bundle_url = ""
+    if args.runtime_repo:
+        runtime_repo = Path(args.runtime_repo).expanduser().resolve()
+        if not runtime_repo.exists():
+            raise SystemExit(f"Runtime repo does not exist: {runtime_repo}")
+        if not (runtime_repo / "bootstrap" / "stack.yaml").exists():
+            raise SystemExit(f"Runtime repo does not look initialized: missing bootstrap/stack.yaml in {runtime_repo}")
+    elif args.runtime_bundle_url:
+        runtime_bundle_url = resolve_runtime_bundle_url(args.runtime_bundle_url)
+        runtime_repo = hydrate_runtime_bundle(paths.runtime_dir, runtime_bundle_url)
+    else:
+        runtime_repo = hydrate_packaged_runtime(paths.runtime_dir)
     state = load_state(paths)
     state.runtime_repo_path = str(runtime_repo)
+    state.runtime_bundle_url = runtime_bundle_url
     state.codex_path = codex_path
     state.launch_agent_path = str(paths.launch_agent_path)
     save_state(paths, state)
     print(f"Initialized GTN state at {paths.root}")
     print(f"runtime_repo={runtime_repo}")
+    if runtime_bundle_url:
+        print(f"runtime_bundle_url={runtime_bundle_url}")
     print(f"codex_path={codex_path}")
     return 0
 
@@ -214,18 +343,39 @@ def cmd_update(args: argparse.Namespace) -> int:
         run_id = lock.get("run_id", "(unknown)")
         raise SystemExit(f"Cannot update while a GTN run is active (run_id={run_id}).")
 
-    dirty_paths = dirty_runtime_paths(runtime_repo)
-    snapshots = snapshot_preserved_runtime_state(runtime_repo, dirty_paths)
-    reset_runtime_paths_to_head(runtime_repo, sorted(snapshots))
+    packaged_runtime_mode = not state.runtime_bundle_url and not runtime_uses_git_checkout(runtime_repo)
+    if packaged_runtime_mode:
+        python_hint = paths.root / ".venv" / "bin" / "python"
+        print("GTN now expects package-manager-native upgrades.")
+        print(f"Use: uv pip install --python {python_hint} --upgrade goodtoknow-gtn")
+        return 0
+
+    if state.runtime_bundle_url:
+        snapshots = snapshot_runtime_state_files(runtime_repo)
+        preserved_count = len(snapshots)
+    else:
+        dirty_paths = dirty_runtime_paths(runtime_repo)
+        snapshots = snapshot_preserved_runtime_state(runtime_repo, dirty_paths)
+        reset_runtime_paths_to_head(runtime_repo, sorted(snapshots))
+        preserved_count = len(snapshots)
 
     try:
-        subprocess.run(["git", "-C", str(runtime_repo), "pull", "--ff-only"], check=True)
+        if state.runtime_bundle_url:
+            bundle_url = resolve_runtime_bundle_url(state.runtime_bundle_url)
+            hydrate_runtime_bundle(runtime_repo, bundle_url)
+            restore_runtime_state_snapshots(runtime_repo, snapshots)
+        elif runtime_uses_git_checkout(runtime_repo):
+            subprocess.run(["git", "-C", str(runtime_repo), "pull", "--ff-only"], check=True)
+        else:
+            hydrate_packaged_runtime(runtime_repo)
+            restore_runtime_state_snapshots(runtime_repo, snapshots)
         install_runtime_editable(runtime_repo)
     finally:
-        restore_runtime_state_snapshots(runtime_repo, snapshots)
+        if not state.runtime_bundle_url and not packaged_runtime_mode and runtime_uses_git_checkout(runtime_repo):
+            restore_runtime_state_snapshots(runtime_repo, snapshots)
 
-    if snapshots:
-        print(f"Preserved local GTN state for {len(snapshots)} file(s).")
+    if preserved_count:
+        print(f"Preserved local GTN state for {preserved_count} file(s).")
     print(f"Updated GTN runtime at {runtime_repo}")
     return 0
 
@@ -252,50 +402,17 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
         shutil.rmtree(paths.root)
 
     print(f"Uninstalled GTN from {paths.root}")
+    print("If the goodtoknow-gtn package is still installed, remove it with: uv pip uninstall goodtoknow-gtn")
     return 0
-
-def latest_result(paths: GTNPaths) -> tuple[dict | None, Path | None]:
-    runs = sorted([path for path in paths.runs_dir.iterdir() if path.is_dir()]) if paths.runs_dir.exists() else []
-    if not runs:
-        return None, None
-    latest = runs[-1]
-    result_path = latest / "result.json"
-    if not result_path.exists():
-        return None, latest
-    return json.loads(result_path.read_text(encoding="utf-8")), latest
 
 def cmd_status(args: argparse.Namespace) -> int:
     paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
     state = load_state(paths)
-    result, latest_run_dir = latest_result(paths)
-    cadence = state.cadence or "(unset)"
-    enabled = state.enabled and launch_agent_loaded()
-    lock = load_lock(paths.lock_file)
-    lock_state = lock_status(paths.lock_file)
-
-    next_run = None
-    if state.enabled and state.cadence:
-        _, seconds = parse_cadence(state.cadence)
-        last_epoch = None
-        if result and result.get("updated_at"):
-            last_epoch = datetime.fromisoformat(result["updated_at"].replace("Z", "+00:00")).timestamp()
-        estimate = next_run_epoch(last_epoch, seconds)
-        if estimate is not None:
-            next_run = datetime.fromtimestamp(estimate, tz=timezone.utc).astimezone().isoformat(timespec="seconds")
-
-    print(f"enabled={enabled}")
-    print(f"cadence={cadence}")
-    print(f"runtime_repo={state.runtime_repo_path or '(unset)'}")
-    print(f"launch_agent={paths.launch_agent_path}")
-    print(f"lock_state={lock_state}")
-    if lock:
-        print(f"lock_run_id={lock.get('run_id', '(unknown)')}")
-    if latest_run_dir:
-        print(f"last_run_dir={latest_run_dir}")
-    if result:
-        print(f"last_result={result.get('state', '(unknown)')}")
-        print(f"last_updated={result.get('updated_at', '(unknown)')}")
-    print(f"next_run={next_run or '(unknown)'}")
+    if not state.initialized_at:
+        state = ensure_state_initialized_at(state)
+        save_state(paths, state)
+    snapshot = build_status_snapshot(paths, state)
+    Console().print(build_status_dashboard(snapshot))
     print(f"stale_lock_seconds={STALE_LOCK_SECONDS}")
     return 0
 
@@ -305,7 +422,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init", help=argparse.SUPPRESS)
-    init_parser.add_argument("--runtime-repo", required=True)
+    init_parser.add_argument("--runtime-repo")
+    init_parser.add_argument("--runtime-bundle-url")
     init_parser.add_argument("--codex-path")
     init_parser.set_defaults(func=cmd_init)
 

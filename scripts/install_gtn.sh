@@ -2,16 +2,12 @@
 set -euo pipefail
 
 GTN_HOME="${GTN_HOME:-$HOME/.gtn}"
-RUNTIME_ROOT="$GTN_HOME/runtime"
-RUNTIME_REPO="$RUNTIME_ROOT/GoodToKnow"
 VENV_DIR="$GTN_HOME/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
 GLOBAL_BIN_DIR="${GLOBAL_BIN_DIR:-$HOME/.local/bin}"
 GTN_WRAPPER="$GLOBAL_BIN_DIR/gtn"
-SOURCE_URL="${SOURCE_URL:-$(git remote get-url origin 2>/dev/null || true)}"
-if [[ -z "$SOURCE_URL" ]]; then
-  SOURCE_URL="https://github.com/qzzqzzb/good-to-know.git"
-fi
+PACKAGE_NAME="${PACKAGE_NAME:-goodtoknow-gtn}"
+PACKAGE_REF="${PACKAGE_REF:-$PACKAGE_NAME}"
 
 UV_BIN="${UV_BIN:-$(command -v uv || true)}"
 if [[ -z "$UV_BIN" ]]; then
@@ -19,16 +15,10 @@ if [[ -z "$UV_BIN" ]]; then
   exit 1
 fi
 
-mkdir -p "$RUNTIME_ROOT" "$GLOBAL_BIN_DIR" "$GTN_HOME/runs" "$GTN_HOME/logs"
-
-if [[ -d "$RUNTIME_REPO/.git" ]]; then
-  git -C "$RUNTIME_REPO" pull --ff-only
-else
-  git clone "$SOURCE_URL" "$RUNTIME_REPO"
-fi
+mkdir -p "$GLOBAL_BIN_DIR" "$GTN_HOME/runs" "$GTN_HOME/logs"
 
 "$UV_BIN" venv "$VENV_DIR"
-"$UV_BIN" pip install --python "$VENV_PYTHON" --editable "$RUNTIME_REPO"
+"$UV_BIN" pip install --python "$VENV_PYTHON" "$PACKAGE_REF"
 
 CODEX_PATH="$(command -v codex || true)"
 if [[ -z "$CODEX_PATH" ]]; then
@@ -43,9 +33,10 @@ exec "$VENV_PYTHON" -m runtime.gtn_local_product "\$@"
 EOF
 chmod +x "$GTN_WRAPPER"
 
-"$GTN_WRAPPER" init --runtime-repo "$RUNTIME_REPO" --codex-path "$CODEX_PATH"
+"$GTN_WRAPPER" init --codex-path "$CODEX_PATH"
 
-NOTION_SETTINGS="$RUNTIME_REPO/output/notion-briefing/settings.json"
+RUNTIME_ROOT="$GTN_HOME/runtime/GoodToKnow"
+NOTION_SETTINGS="$RUNTIME_ROOT/output/notion-briefing/settings.json"
 NOTION_PAGE_URL="${GTN_NOTION_PAGE_URL:-}"
 
 if [[ -z "$NOTION_PAGE_URL" && -t 0 ]]; then
@@ -102,10 +93,11 @@ EOF
 fi
 
 if [[ -n "$USER_PROFILE" ]]; then
-  "$VENV_PYTHON" "$RUNTIME_REPO/memory/mempalace-memory/scripts/record_user_profile.py" "$USER_PROFILE"
+  "$VENV_PYTHON" "$RUNTIME_ROOT/memory/mempalace-memory/scripts/record_user_profile.py" "$USER_PROFILE"
 fi
 
-echo "GTN installed. Runtime repo: $RUNTIME_REPO"
+echo "GTN installed from package: $PACKAGE_REF"
+echo "GTN runtime: $RUNTIME_ROOT"
 echo "GTN command: $GTN_WRAPPER"
 if [[ ":$PATH:" != *":$GLOBAL_BIN_DIR:"* ]]; then
   echo "Warning: $GLOBAL_BIN_DIR is not currently on PATH."

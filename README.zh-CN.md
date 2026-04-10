@@ -29,7 +29,7 @@
 curl -fsSL https://raw.githubusercontent.com/qzzqzzb/good-to-know/main/scripts/install_gtn.sh | bash
 ```
 
-这会安装本地 `gtn` 命令，并在 `~/.gtn` 下建立一个属于当前用户的 runtime。
+这会把发布后的 `goodtoknow-gtn` 包安装进本地虚拟环境，写入本地 `gtn` wrapper，并在 `~/.gtn` 下初始化一个属于当前用户的 runtime。
 
 ## GoodToKnow 是什么
 
@@ -67,7 +67,6 @@ GoodToKnow 面向这样一类人：你觉得自己可能正错过某些有价值
 目前你需要：
 
 - macOS
-- `git`
 - `uv`
 - 一个已经能正常登录和认证的本地 Codex 环境
 
@@ -101,16 +100,16 @@ gtn freq 1h
 gtn stop
 ```
 
-更新已安装的 runtime：
+通过 PyPI 升级 GTN：
 
 ```bash
-gtn update
+uv pip install --python ~/.gtn/.venv/bin/python --upgrade goodtoknow-gtn
 ```
 
-卸载本地产品安装：
+如果你想卸载 GTN 这个包本身：
 
 ```bash
-gtn uninstall
+uv pip uninstall goodtoknow-gtn
 ```
 
 ## 它是如何工作的

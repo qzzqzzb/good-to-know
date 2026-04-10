@@ -1,0 +1,10 @@
+runtime_skill: runtime/codex-agent-loop
+memory_skill: memory/mempalace-memory
+context_skills:
+  - context/naive-context
+discovery_skills:
+  - discovery/web-discovery
+output_skills:
+  - output/notion-briefing
+  - output/feishu-briefing
+run_output_dir: runs

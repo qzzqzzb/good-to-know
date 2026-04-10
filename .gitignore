@@ -16,4 +16,5 @@ personal_input_agent_design_brief.md
 !.codex/prompts/**
 references/
 .venv/
+*.egg-info/
 memory/mempalace-memory/.data/

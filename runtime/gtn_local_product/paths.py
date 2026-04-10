@@ -16,6 +16,8 @@ class GTNPaths:
     lock_file: Path
     logs_dir: Path
     runs_dir: Path
+    status_dir: Path
+    status_history_file: Path
     runtime_dir: Path
     launch_agents_dir: Path
     launch_agent_path: Path
@@ -36,6 +38,8 @@ def resolve_paths(root: Path | None = None, runtime_dir: Path | None = None) -> 
         lock_file=root_path / "lock.json",
         logs_dir=root_path / "logs",
         runs_dir=root_path / "runs",
+        status_dir=root_path / "status",
+        status_history_file=root_path / "status" / "history.json",
         runtime_dir=runtime_path,
         launch_agents_dir=launch_agents_dir,
         launch_agent_path=launch_agents_dir / f"{DEFAULT_LAUNCH_AGENT_LABEL}.plist",
@@ -45,4 +49,5 @@ def ensure_directories(paths: GTNPaths) -> None:
     paths.root.mkdir(parents=True, exist_ok=True)
     paths.logs_dir.mkdir(parents=True, exist_ok=True)
     paths.runs_dir.mkdir(parents=True, exist_ok=True)
+    paths.status_dir.mkdir(parents=True, exist_ok=True)
     paths.launch_agents_dir.mkdir(parents=True, exist_ok=True)
