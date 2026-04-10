@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -73,6 +74,30 @@ class StatusTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def _seed_runtime_tree(self, base: Path, readme_text: str = "seed\n") -> None:
+        for rel_path, content in {
+            "bootstrap/stack.yaml": "run_output_dir: runs\n",
+            "context/naive-context/outbox.md": "# Naive Context Outbox\n",
+            "discovery/web-discovery/outbox.md": "# Web Discovery Outbox\n",
+            "memory/naive-memory/external_findings.md": "# External Findings\n",
+            "memory/naive-memory/user_context.md": "# User Context\n",
+            "output/feishu-briefing/settings.json": "{\n  \"webhook_url\": \"\"\n}\n",
+            "output/notion-briefing/page_index.json": "{\n  \"pages\": {}\n}\n",
+            "output/notion-briefing/settings.json": "{\n  \"parent_page_url\": \"\"\n}\n",
+            "README.md": readme_text,
+        }.items():
+            path = base / rel_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+    def _make_runtime_bundle(self, tmp: Path, readme_text: str = "seed\n") -> Path:
+        source_root = tmp / "bundle-root" / "good-to-know-main"
+        self._seed_runtime_tree(source_root, readme_text=readme_text)
+        bundle_path = tmp / "runtime-bundle.tar.gz"
+        with tarfile.open(bundle_path, "w:gz") as archive:
+            archive.add(source_root, arcname="good-to-know-main")
+        return bundle_path
+
     def test_status_reports_basic_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -97,6 +122,7 @@ class StatusTests(unittest.TestCase):
             self.assertIn("enabled=True", output)
             self.assertIn("cadence=1h", output)
             self.assertIn("last_result=success", output)
+            self.assertIn("runtime_bundle_url=(unset)", output)
 
     def test_exit_code_for_failed_state_is_nonzero(self) -> None:
         self.assertEqual(exit_code_for_state(ResultState.SUCCESS), 0)
@@ -107,6 +133,34 @@ class StatusTests(unittest.TestCase):
             root = Path(tmp)
             with self.assertRaises(SystemExit):
                 cli.main(["--root", str(root), "init", "--runtime-repo", str(root / "missing"), "--codex-path", "/usr/bin/codex"])
+
+    def test_init_can_hydrate_runtime_from_bundle_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            root = tmp_path / ".gtn"
+            bundle_path = self._make_runtime_bundle(tmp_path)
+
+            with (
+                patch.object(cli, "resolve_codex_executable", return_value=Path("/bin/echo")),
+                patch.object(cli.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)),
+            ):
+                rc = cli.main(
+                    [
+                        "--root",
+                        str(root),
+                        "init",
+                        "--runtime-bundle-url",
+                        bundle_path.as_uri(),
+                        "--codex-path",
+                        "/bin/echo",
+                    ]
+                )
+
+            self.assertEqual(rc, 0)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            self.assertTrue((runtime_repo / "bootstrap" / "stack.yaml").exists())
+            state = json.loads((root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["runtime_bundle_url"], bundle_path.as_uri())
 
     def test_update_refuses_when_lock_is_active(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -253,6 +307,46 @@ class StatusTests(unittest.TestCase):
 
             self.assertIn("non-runtime state files", str(error.exception))
             self.assertEqual((runtime_repo / "README.md").read_text(encoding="utf-8"), "local edit\n")
+
+    def test_update_refreshes_bundle_runtime_and_preserves_state_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            root = tmp_path / ".gtn"
+            root.mkdir(parents=True, exist_ok=True)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            self._seed_runtime_tree(runtime_repo, readme_text="old bundle\n")
+            tracked_state = runtime_repo / "output" / "notion-briefing" / "settings.json"
+            tracked_state.write_text("{\n  \"parent_page_url\": \"https://notion.local/page\"\n}\n", encoding="utf-8")
+            bundle_path = self._make_runtime_bundle(tmp_path, readme_text="new bundle\n")
+            (root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "runtime_repo_path": str(runtime_repo),
+                        "runtime_bundle_url": bundle_path.as_uri(),
+                        "codex_path": "/bin/echo",
+                        "launch_agent_path": str(root / "com.goodtoknow.gtn.plist"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            real_run = subprocess.run
+
+            def wrapped_run(*args, **kwargs):
+                cmd = args[0]
+                if cmd[:3] == [cli.sys.executable, "-m", "pip"]:
+                    return subprocess.CompletedProcess(cmd, 0)
+                return real_run(*args, **kwargs)
+
+            with patch.object(cli.subprocess, "run", side_effect=wrapped_run):
+                rc = cli.main(["--root", str(root), "update"])
+
+            self.assertEqual(rc, 0)
+            self.assertEqual((runtime_repo / "README.md").read_text(encoding="utf-8"), "new bundle\n")
+            self.assertEqual(
+                tracked_state.read_text(encoding="utf-8"),
+                "{\n  \"parent_page_url\": \"https://notion.local/page\"\n}\n",
+            )
 
     def test_uninstall_removes_root_and_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

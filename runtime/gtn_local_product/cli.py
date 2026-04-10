@@ -5,6 +5,10 @@ import json
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
+from urllib.parse import urlparse
+from urllib.request import urlopen
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +20,7 @@ from .paths import GTNPaths, ensure_directories, resolve_paths
 from .runner import resolve_codex_executable, run_once
 from .storage import load_json, save_json
 
+DEFAULT_RUNTIME_BUNDLE_URL = "https://github.com/qzzqzzb/good-to-know/archive/refs/heads/main.tar.gz"
 PRESERVED_RUNTIME_STATE_PATHS = frozenset(
     {
         "context/naive-context/outbox.md",
@@ -49,6 +54,61 @@ def save_state(paths: GTNPaths, state: StateData) -> None:
     save_json(paths.state_file, state)
 
 
+def resolve_runtime_bundle_url(explicit_url: str | None = None) -> str:
+    return explicit_url or DEFAULT_RUNTIME_BUNDLE_URL
+
+
+def download_runtime_bundle(bundle_url: str, destination_dir: Path) -> Path:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    parsed = urlparse(bundle_url)
+    bundle_name = Path(parsed.path).name or "runtime-bundle.tar.gz"
+    bundle_path = destination_dir / bundle_name
+    with urlopen(bundle_url) as response:
+        bundle_path.write_bytes(response.read())
+    return bundle_path
+
+
+def extract_runtime_bundle(bundle_path: Path, destination_dir: Path) -> Path:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(bundle_path, "r:gz") as archive:
+        members = archive.getmembers()
+        archive.extractall(destination_dir)
+    top_level_dirs = {
+        member.name.split("/", 1)[0]
+        for member in members
+        if member.name and member.name.strip("/") and "/" in member.name
+    }
+    if len(top_level_dirs) == 1:
+        extracted_root = destination_dir / next(iter(top_level_dirs))
+    else:
+        extracted_root = destination_dir
+    if not (extracted_root / "bootstrap" / "stack.yaml").exists():
+        raise SystemExit(f"Runtime bundle did not contain a valid GTN runtime: {bundle_path}")
+    return extracted_root
+
+
+def hydrate_runtime_bundle(runtime_repo: Path, bundle_url: str) -> Path:
+    with tempfile.TemporaryDirectory(prefix="gtn-runtime-bundle-") as tmp:
+        tmp_path = Path(tmp)
+        bundle_path = download_runtime_bundle(bundle_url, tmp_path)
+        extracted_root = extract_runtime_bundle(bundle_path, tmp_path / "extract")
+        if runtime_repo.exists():
+            shutil.rmtree(runtime_repo)
+        runtime_repo.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(extracted_root, runtime_repo)
+    return runtime_repo.resolve()
+
+
+def snapshot_runtime_state_files(runtime_repo: Path) -> dict[str, bytes | None]:
+    snapshots: dict[str, bytes | None] = {}
+    for rel_path in sorted(PRESERVED_RUNTIME_STATE_PATHS):
+        file_path = runtime_repo / rel_path
+        if not file_path.exists():
+            continue
+        snapshots[rel_path] = file_path.read_bytes()
+    return snapshots
+
+
 def require_initialized_runtime(state: StateData) -> Path:
     if not state.runtime_repo_path:
         raise SystemExit("GTN is not initialized. Run the install/init flow first.")
@@ -76,18 +136,26 @@ def cmd_init(args: argparse.Namespace) -> int:
     paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
     ensure_directories(paths)
     codex_path = str(resolve_codex_executable(args.codex_path))
-    runtime_repo = Path(args.runtime_repo).expanduser().resolve()
-    if not runtime_repo.exists():
-        raise SystemExit(f"Runtime repo does not exist: {runtime_repo}")
-    if not (runtime_repo / "bootstrap" / "stack.yaml").exists():
-        raise SystemExit(f"Runtime repo does not look initialized: missing bootstrap/stack.yaml in {runtime_repo}")
+    runtime_bundle_url = ""
+    if args.runtime_repo:
+        runtime_repo = Path(args.runtime_repo).expanduser().resolve()
+        if not runtime_repo.exists():
+            raise SystemExit(f"Runtime repo does not exist: {runtime_repo}")
+        if not (runtime_repo / "bootstrap" / "stack.yaml").exists():
+            raise SystemExit(f"Runtime repo does not look initialized: missing bootstrap/stack.yaml in {runtime_repo}")
+    else:
+        runtime_bundle_url = resolve_runtime_bundle_url(args.runtime_bundle_url)
+        runtime_repo = hydrate_runtime_bundle(paths.runtime_dir, runtime_bundle_url)
     state = load_state(paths)
     state.runtime_repo_path = str(runtime_repo)
+    state.runtime_bundle_url = runtime_bundle_url
     state.codex_path = codex_path
     state.launch_agent_path = str(paths.launch_agent_path)
     save_state(paths, state)
     print(f"Initialized GTN state at {paths.root}")
     print(f"runtime_repo={runtime_repo}")
+    if runtime_bundle_url:
+        print(f"runtime_bundle_url={runtime_bundle_url}")
     print(f"codex_path={codex_path}")
     return 0
 
@@ -214,18 +282,29 @@ def cmd_update(args: argparse.Namespace) -> int:
         run_id = lock.get("run_id", "(unknown)")
         raise SystemExit(f"Cannot update while a GTN run is active (run_id={run_id}).")
 
-    dirty_paths = dirty_runtime_paths(runtime_repo)
-    snapshots = snapshot_preserved_runtime_state(runtime_repo, dirty_paths)
-    reset_runtime_paths_to_head(runtime_repo, sorted(snapshots))
+    if state.runtime_bundle_url:
+        snapshots = snapshot_runtime_state_files(runtime_repo)
+        preserved_count = len(snapshots)
+    else:
+        dirty_paths = dirty_runtime_paths(runtime_repo)
+        snapshots = snapshot_preserved_runtime_state(runtime_repo, dirty_paths)
+        reset_runtime_paths_to_head(runtime_repo, sorted(snapshots))
+        preserved_count = len(snapshots)
 
     try:
-        subprocess.run(["git", "-C", str(runtime_repo), "pull", "--ff-only"], check=True)
+        if state.runtime_bundle_url:
+            bundle_url = resolve_runtime_bundle_url(state.runtime_bundle_url)
+            hydrate_runtime_bundle(runtime_repo, bundle_url)
+            restore_runtime_state_snapshots(runtime_repo, snapshots)
+        else:
+            subprocess.run(["git", "-C", str(runtime_repo), "pull", "--ff-only"], check=True)
         install_runtime_editable(runtime_repo)
     finally:
-        restore_runtime_state_snapshots(runtime_repo, snapshots)
+        if not state.runtime_bundle_url:
+            restore_runtime_state_snapshots(runtime_repo, snapshots)
 
-    if snapshots:
-        print(f"Preserved local GTN state for {len(snapshots)} file(s).")
+    if preserved_count:
+        print(f"Preserved local GTN state for {preserved_count} file(s).")
     print(f"Updated GTN runtime at {runtime_repo}")
     return 0
 
@@ -286,6 +365,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"enabled={enabled}")
     print(f"cadence={cadence}")
     print(f"runtime_repo={state.runtime_repo_path or '(unset)'}")
+    print(f"runtime_bundle_url={state.runtime_bundle_url or '(unset)'}")
     print(f"launch_agent={paths.launch_agent_path}")
     print(f"lock_state={lock_state}")
     if lock:
@@ -305,7 +385,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init", help=argparse.SUPPRESS)
-    init_parser.add_argument("--runtime-repo", required=True)
+    init_parser.add_argument("--runtime-repo")
+    init_parser.add_argument("--runtime-bundle-url")
     init_parser.add_argument("--codex-path")
     init_parser.set_defaults(func=cmd_init)
 

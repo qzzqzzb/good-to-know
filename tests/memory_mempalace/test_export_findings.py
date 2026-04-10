@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -11,8 +12,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 INGEST_FINDINGS = ROOT / "memory/mempalace-memory/scripts/ingest_findings.py"
 EXPORT = ROOT / "memory/mempalace-memory/scripts/export_findings.py"
+MEMPALACE_AVAILABLE = importlib.util.find_spec("mempalace") is not None
 
 
+@unittest.skipUnless(MEMPALACE_AVAILABLE, "mempalace package is not installed in this test environment")
 class ExportFindingsTests(unittest.TestCase):
     def test_export_findings_writes_expected_json_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

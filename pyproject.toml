@@ -5,11 +5,26 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "goodtoknow-gtn"
 version = "0.1.0"
-description = "GoodToKnow local product shell"
-readme = "AGENTS.md"
+description = "GoodToKnow CLI manager for installing and running the local-first GTN runtime"
+readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "GoodToKnow"}]
 dependencies = ["mempalace==3.0.0"]
+keywords = ["gtn", "goodtoknow", "codex", "agent", "cli"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Environment :: Console",
+  "Operating System :: MacOS",
+  "Intended Audience :: Developers",
+]
+
+[project.urls]
+Homepage = "https://github.com/qzzqzzb/good-to-know"
+Repository = "https://github.com/qzzqzzb/good-to-know"
 
 [project.scripts]
 gtn = "runtime.gtn_local_product.cli:main"

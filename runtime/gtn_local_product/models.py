@@ -29,6 +29,7 @@ class LockInfo:
 @dataclass
 class StateData:
     runtime_repo_path: str = ""
+    runtime_bundle_url: str = ""
     codex_path: str = ""
     cadence: str = ""
     enabled: bool = False
