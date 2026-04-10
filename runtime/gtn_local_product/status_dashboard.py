@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+import re
 from datetime import datetime, timezone
+from importlib import metadata
 from io import StringIO
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from rich import box
 from rich.align import Align
@@ -25,6 +30,10 @@ from .status_data import (
     top_profile_keywords,
 )
 from .storage import load_json
+
+PACKAGE_NAME = 'goodtoknow-gtn'
+PYPI_JSON_URL = f'https://pypi.org/pypi/{PACKAGE_NAME}/json'
+_VERSION_TOKEN_RE = re.compile(r'\d+|[A-Za-z]+')
 
 
 def format_datetime(raw_value: str | None) -> str:
@@ -144,6 +153,125 @@ def display_destination(raw_value: str, reveal: int = 14, sensitive: bool = Fals
     return f'{value[:reveal]}...{value[-reveal:]}'
 
 
+def repo_declared_version() -> str | None:
+    pyproject_path = Path(__file__).resolve().parents[2] / 'pyproject.toml'
+    if not pyproject_path.exists():
+        return None
+    try:
+        import tomllib
+
+        payload = tomllib.loads(pyproject_path.read_text(encoding='utf-8'))
+        version = str(((payload.get('project') or {}).get('version') or '')).strip()
+        return version or None
+    except ModuleNotFoundError:
+        raw = pyproject_path.read_text(encoding='utf-8')
+    except (OSError, ValueError):
+        return None
+    match = re.search(r'(?m)^version\s*=\s*"([^"]+)"\s*$', raw)
+    if not match:
+        return None
+    version = match.group(1).strip()
+    return version or None
+
+
+def installed_version_info() -> tuple[str, str]:
+    try:
+        return metadata.version(PACKAGE_NAME), 'installed'
+    except metadata.PackageNotFoundError:
+        declared = repo_declared_version()
+        if declared:
+            return declared, 'repo'
+        return '(unknown)', 'unknown'
+
+
+def fetch_latest_pypi_version(timeout_seconds: float = 2.0) -> tuple[str | None, str | None]:
+    request = Request(
+        PYPI_JSON_URL,
+        headers={
+            'Accept': 'application/json',
+            'User-Agent': f'{PACKAGE_NAME}-status-check',
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            payload = json.load(response)
+    except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
+        return None, str(exc)
+    version = str((payload.get('info') or {}).get('version') or '').strip()
+    return (version or None), None
+
+
+def compare_versions(left: str, right: str) -> int:
+    parsed = compare_versions_with_packaging(left, right)
+    if parsed is not None:
+        return parsed
+    return basic_compare_versions(left, right)
+
+
+def compare_versions_with_packaging(left: str, right: str) -> int | None:
+    try:
+        from packaging.version import InvalidVersion, Version
+    except ImportError:
+        return None
+
+    try:
+        left_version = Version(left)
+        right_version = Version(right)
+    except InvalidVersion:
+        return None
+
+    if left_version < right_version:
+        return -1
+    if left_version > right_version:
+        return 1
+    return 0
+
+
+def basic_compare_versions(left: str, right: str) -> int:
+    left_tokens = version_tokens(left)
+    right_tokens = version_tokens(right)
+    sentinel = (1, 0)
+    for index in range(max(len(left_tokens), len(right_tokens))):
+        left_token = left_tokens[index] if index < len(left_tokens) else sentinel
+        right_token = right_tokens[index] if index < len(right_tokens) else sentinel
+        if left_token == right_token:
+            continue
+        return -1 if left_token < right_token else 1
+    return 0
+
+
+def version_tokens(value: str) -> list[tuple[int, int | str]]:
+    tokens: list[tuple[int, int | str]] = []
+    for token in _VERSION_TOKEN_RE.findall(value):
+        if token.isdigit():
+            tokens.append((1, int(token)))
+        else:
+            tokens.append((0, token.lower()))
+    return tokens
+
+
+def latest_version_display(
+    current_version: str,
+    current_source: str,
+    latest_version: str | None,
+    latest_error: str | None,
+) -> str:
+    if latest_version:
+        if current_source == 'installed':
+            comparison = compare_versions(current_version, latest_version)
+            if comparison == 0:
+                return f'{latest_version} (up to date)'
+            if comparison < 0:
+                return f'{latest_version} (update available)'
+            return f'{latest_version} (local build ahead)'
+        if current_version == latest_version:
+            return f'{latest_version} (matches repo)'
+        return latest_version
+    if latest_error:
+        return '(check failed)'
+    return '(unknown)'
+
+
 def build_status_snapshot(paths: GTNPaths, state: StateData) -> dict:
     latest_summary, latest_run_dir = latest_run_snapshot(paths)
     latest_updated_at = str((latest_summary or {}).get('updated_at', '')).strip() or None
@@ -173,6 +301,9 @@ def build_status_snapshot(paths: GTNPaths, state: StateData) -> dict:
         except ValueError:
             uptime_seconds = None
 
+    current_version, current_version_source = installed_version_info()
+    latest_version, latest_version_error = fetch_latest_pypi_version()
+
     return {
         'enabled': state.enabled and launch_agent_loaded(),
         'cadence': state.cadence or '(unset)',
@@ -192,6 +323,14 @@ def build_status_snapshot(paths: GTNPaths, state: StateData) -> dict:
         ),
         'feishu_webhook': display_destination(str(feishu_settings.get('webhook_url', '')), sensitive=True),
         'keywords': keywords,
+        'current_version': current_version,
+        'current_version_source': current_version_source,
+        'latest_version': latest_version_display(
+            current_version,
+            current_version_source,
+            latest_version,
+            latest_version_error,
+        ),
     }
 
 
@@ -237,6 +376,11 @@ def build_status_dashboard(snapshot: dict):
     system.add_column(style='bold cyan', justify='right')
     system.add_column()
     system.add_row('Enabled', enabled_badge(bool(snapshot.get('enabled', False))))
+    current_version = str(snapshot.get('current_version', '(unknown)'))
+    if snapshot.get('current_version_source') == 'repo' and current_version != '(unknown)':
+        current_version = f'{current_version} (repo)'
+    system.add_row('Version', current_version)
+    system.add_row('Latest', str(snapshot.get('latest_version', '(unknown)')))
     system.add_row('Cadence', str(snapshot.get('cadence', '(unset)')))
     system.add_row(
         'Next run',

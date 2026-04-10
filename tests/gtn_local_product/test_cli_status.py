@@ -191,7 +191,13 @@ class StatusTests(unittest.TestCase):
                 encoding="utf-8",
             )
             buf = io.StringIO()
-            with patch.object(cli, "launch_agent_loaded", return_value=True), redirect_stdout(buf):
+            with (
+                patch.object(cli, "launch_agent_loaded", return_value=True),
+                patch("runtime.gtn_local_product.status_dashboard.launch_agent_loaded", return_value=True),
+                patch("runtime.gtn_local_product.status_dashboard.installed_version_info", return_value=("0.2.1", "installed")),
+                patch("runtime.gtn_local_product.status_dashboard.fetch_latest_pypi_version", return_value=("0.2.2", None)),
+                redirect_stdout(buf),
+            ):
                 rc = cli.main(["--root", str(root), "status"])
             output = buf.getvalue()
             self.assertEqual(rc, 0)
@@ -212,6 +218,9 @@ class StatusTests(unittest.TestCase):
             self.assertIn("configured", output)
             self.assertNotIn("test-hook", output)
             self.assertRegex(output.lower(), r"agents?\s+3")
+            self.assertRegex(output, r"Version\s+0\.2\.1")
+            self.assertIn("0.2.2 (update", output)
+            self.assertIn("available)", output)
 
     def test_status_shows_no_run_yet_when_no_run_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -232,11 +241,75 @@ class StatusTests(unittest.TestCase):
                 encoding="utf-8",
             )
             buf = io.StringIO()
-            with redirect_stdout(buf):
+            with (
+                patch("runtime.gtn_local_product.status_dashboard.installed_version_info", return_value=("0.2.1", "installed")),
+                patch("runtime.gtn_local_product.status_dashboard.fetch_latest_pypi_version", return_value=("0.2.1", None)),
+                redirect_stdout(buf),
+            ):
                 rc = cli.main(["--root", str(root), "status"])
             output = buf.getvalue()
             self.assertEqual(rc, 0)
             self.assertIn("No run yet", output)
+
+    def test_status_marks_repo_version_source_when_package_metadata_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            self._seed_runtime_tree(runtime_repo)
+            (root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "runtime_repo_path": str(runtime_repo),
+                        "codex_path": "/usr/local/bin/codex",
+                        "cadence": "1h",
+                        "enabled": False,
+                        "launch_agent_path": str(Path.home() / "Library/LaunchAgents/com.goodtoknow.gtn.plist"),
+                        "initialized_at": "2026-04-07T10:00:00+08:00",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with (
+                patch("runtime.gtn_local_product.status_dashboard.installed_version_info", return_value=("0.2.1", "repo")),
+                patch("runtime.gtn_local_product.status_dashboard.fetch_latest_pypi_version", return_value=("0.2.1", None)),
+                redirect_stdout(buf),
+            ):
+                rc = cli.main(["--root", str(root), "status"])
+            output = buf.getvalue()
+            self.assertEqual(rc, 0)
+            self.assertRegex(output, r"Version\s+0\.2\.1 \(repo\)")
+            self.assertRegex(output, r"Latest\s+0\.2\.1 \(matches repo\)")
+
+    def test_status_survives_latest_version_check_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            self._seed_runtime_tree(runtime_repo)
+            (root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "runtime_repo_path": str(runtime_repo),
+                        "codex_path": "/usr/local/bin/codex",
+                        "cadence": "1h",
+                        "enabled": False,
+                        "launch_agent_path": str(Path.home() / "Library/LaunchAgents/com.goodtoknow.gtn.plist"),
+                        "initialized_at": "2026-04-07T10:00:00+08:00",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with (
+                patch("runtime.gtn_local_product.status_dashboard.installed_version_info", return_value=("0.2.1", "installed")),
+                patch("runtime.gtn_local_product.status_dashboard.fetch_latest_pypi_version", return_value=(None, "ssl error")),
+                redirect_stdout(buf),
+            ):
+                rc = cli.main(["--root", str(root), "status"])
+            output = buf.getvalue()
+            self.assertEqual(rc, 0)
+            self.assertRegex(output, r"Version\s+0\.2\.1")
+            self.assertRegex(output, r"Latest\s+\(check failed\)")
 
     def test_run_prints_summary_when_runner_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
