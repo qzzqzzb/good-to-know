@@ -25,5 +25,5 @@ The active runtime shells these scripts directly. Phase 1 does not import memory
 ## Notes
 - Start from an empty palace; no markdown migration is required.
 - Wake-up text always includes `identity.md`, then the top stored memories.
-- Recall and search now delegate directly to the vendored upstream `mempalace` memory stack.
+- Recall and search now delegate directly to the pip-installed `mempalace` memory stack.
 - Findings export is JSON, not markdown.

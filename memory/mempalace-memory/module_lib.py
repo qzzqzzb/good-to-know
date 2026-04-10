@@ -5,12 +5,9 @@ import hashlib
 import json
 import os
 import re
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
-
-import chromadb
 
 ENTRY_PATTERN = re.compile(r"^##\s+(.+)$", re.MULTILINE)
 
@@ -19,13 +16,6 @@ DATA_DIR = Path(os.environ.get("GTN_MEMPALACE_DATA_DIR", SKILL_DIR / ".data")).r
 PALACE_DIR = Path(os.environ.get("GTN_MEMPALACE_PALACE_DIR", DATA_DIR / "palace")).resolve()
 IDENTITY_PATH = Path(os.environ.get("GTN_MEMPALACE_IDENTITY_PATH", SKILL_DIR / "identity.md")).resolve()
 CONFIG_PATH = Path(os.environ.get("GTN_MEMPALACE_CONFIG_PATH", DATA_DIR / "config.json")).resolve()
-VENDOR_DIR = SKILL_DIR / "vendor"
-
-
-def ensure_vendor_on_path() -> None:
-    vendor = str(VENDOR_DIR)
-    if vendor not in sys.path:
-        sys.path.insert(0, vendor)
 
 
 def ensure_paths() -> None:
@@ -60,18 +50,29 @@ def set_mempalace_env() -> None:
 def upstream_config():
     ensure_paths()
     set_mempalace_env()
-    ensure_vendor_on_path()
-    from mempalace.config import MempalaceConfig
+    try:
+        from mempalace.config import MempalaceConfig
+    except ImportError as exc:
+        raise RuntimeError(
+            "mempalace is not installed. Install project dependencies so "
+            "memory/mempalace-memory can use the pip-installed MemPalace package."
+        ) from exc
 
     return MempalaceConfig(config_dir=str(CONFIG_PATH.parent))
 
 
 def get_collection(create: bool = True):
+    if not create:
+        raise RuntimeError("mempalace-memory expects collection access through the pip-installed mempalace package")
     config = upstream_config()
-    client = chromadb.PersistentClient(path=str(config.palace_path))
-    if create:
-        return client.get_or_create_collection(config.collection_name)
-    return client.get_collection(config.collection_name)
+    try:
+        from mempalace.miner import get_collection as upstream_get_collection
+    except ImportError as exc:
+        raise RuntimeError(
+            "mempalace is not installed. Install project dependencies so "
+            "memory/mempalace-memory can use the pip-installed MemPalace package."
+        ) from exc
+    return upstream_get_collection(str(config.palace_path))
 
 
 def split_entries(text: str) -> list[tuple[str, str]]:
@@ -269,13 +270,26 @@ def list_records(bucket: str | None = None) -> list[dict[str, object]]:
 
 def upstream_memory_stack():
     config = upstream_config()
-    from mempalace.layers import MemoryStack
+    try:
+        from mempalace.layers import MemoryStack
+    except ImportError as exc:
+        raise RuntimeError(
+            "mempalace is not installed. Install project dependencies so "
+            "memory/mempalace-memory can use the pip-installed MemPalace package."
+        ) from exc
 
     return MemoryStack(palace_path=str(config.palace_path), identity_path=str(IDENTITY_PATH))
 
 
 def build_wakeup_text(wing: str | None = None) -> str:
     get_collection(create=True)
+    if not list_records():
+        identity = read_identity()
+        return (
+            f"{identity}\n\n"
+            "## L1 — No memories yet.\n"
+            "No stored memories yet. Start using GoodToKnow so this palace can accumulate useful context.\n"
+        )
     stack = upstream_memory_stack()
     text = stack.wake_up(wing=wing)
     if "## L1 — No palace found. Run: mempalace mine <dir>" in text:
