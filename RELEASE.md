@@ -5,7 +5,7 @@ This document is the maintainer checklist for cutting a formal `goodtoknow-gtn` 
 ## Current target
 
 - Package: `goodtoknow-gtn`
-- Version: `0.2.1`
+- Version: `0.3.0`
 
 ## Pre-release checks
 
@@ -49,7 +49,7 @@ This document is the maintainer checklist for cutting a formal `goodtoknow-gtn` 
    ```bash
    tmpdir=$(mktemp -d)
    uv venv "$tmpdir/.venv"
-   uv pip install --python "$tmpdir/.venv/bin/python" dist/goodtoknow_gtn-0.2.1-py3-none-any.whl
+   uv pip install --python "$tmpdir/.venv/bin/python" dist/goodtoknow_gtn-0.3.0-py3-none-any.whl
    "$tmpdir/.venv/bin/gtn" --help
    ```
 
@@ -57,7 +57,7 @@ This document is the maintainer checklist for cutting a formal `goodtoknow-gtn` 
 
    ```bash
    export GTN_HOME="$(mktemp -d)"
-   uv pip install --python "$GTN_HOME/.venv/bin/python" --upgrade --force-reinstall dist/goodtoknow_gtn-0.2.1-py3-none-any.whl
+   uv pip install --python "$GTN_HOME/.venv/bin/python" --upgrade --force-reinstall dist/goodtoknow_gtn-0.3.0-py3-none-any.whl
    env -u NO_COLOR gtn status
    ```
 
@@ -72,7 +72,7 @@ uv publish
 If you want to publish specific artifacts explicitly:
 
 ```bash
-uv publish dist/goodtoknow_gtn-0.2.1.tar.gz dist/goodtoknow_gtn-0.2.1-py3-none-any.whl
+uv publish dist/goodtoknow_gtn-0.3.0.tar.gz dist/goodtoknow_gtn-0.3.0-py3-none-any.whl
 ```
 
 ## Post-publish smoke
@@ -82,22 +82,22 @@ uv publish dist/goodtoknow_gtn-0.2.1.tar.gz dist/goodtoknow_gtn-0.2.1-py3-none-a
    ```bash
    tmpdir=$(mktemp -d)
    uv venv "$tmpdir/.venv"
-   uv pip install --python "$tmpdir/.venv/bin/python" goodtoknow-gtn==0.2.1
+   uv pip install --python "$tmpdir/.venv/bin/python" goodtoknow-gtn==0.3.0
    "$tmpdir/.venv/bin/gtn" --help
    ```
 
 2. Validate the install path used by `install_gtn`:
 
    ```bash
-   uv pip install --python ~/.gtn/.venv/bin/python --upgrade goodtoknow-gtn==0.2.1
+   uv pip install --python ~/.gtn/.venv/bin/python --upgrade goodtoknow-gtn==0.3.0
    env -u NO_COLOR gtn status
    ```
 
 3. Tag the release if you have not already:
 
    ```bash
-   git tag v0.2.1
-   git push origin v0.2.1
+   git tag v0.3.0
+   git push origin v0.3.0
    ```
 
 ## Notes
