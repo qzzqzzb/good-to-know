@@ -23,13 +23,45 @@ It runs locally, reads signals from your current work, uses Codex with web searc
 
 Think of it as a quiet research scout for your real work.
 
-## Install In One Line
+## Installation
+
+### Recommended: install from PyPI
+
+GoodToKnow is now distributed as the published `goodtoknow-gtn` package on PyPI. The supported end-user flow is:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/qzzqzzb/good-to-know/main/scripts/install_gtn.sh | bash
+uv pip install goodtoknow-gtn
+gtn setup
 ```
 
-This installs the published `goodtoknow-gtn` package into a local virtual environment, writes a local `gtn` wrapper, and initializes a user-scoped runtime under `~/.gtn`.
+`gtn setup` now handles the first-time GTN bootstrap flow directly in the CLI:
+
+- initializes the GTN runtime under `~/.gtn`
+- prompts for optional Notion output setup
+- prompts for an optional initial user profile
+
+If your environment does not expose the `gtn` command after `pip install`, invoke it via the Python environment directly or add that environment's script directory to your `PATH`.
+
+### From source
+
+If you want to test local changes or develop GoodToKnow from the repository:
+
+```bash
+git clone https://github.com/qzzqzzb/good-to-know.git
+cd good-to-know
+uv build
+uv pip install --upgrade --force-reinstall dist/goodtoknow_gtn-*.whl
+gtn setup
+```
+
+Or inside a dedicated local virtual environment:
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install --upgrade --force-reinstall dist/goodtoknow_gtn-*.whl
+gtn setup
+```
 
 ## What is GoodToKnow
 

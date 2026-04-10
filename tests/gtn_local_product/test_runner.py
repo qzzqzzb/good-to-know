@@ -19,6 +19,7 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("workspace-write", cmd)
         self.assertIn("--add-dir", cmd)
         self.assertIn("/tmp/app-run", cmd)
+        self.assertIn("--skip-git-repo-check", cmd)
 
     def test_run_once_records_failed_result_on_unexpected_runner_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

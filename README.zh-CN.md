@@ -23,13 +23,45 @@
 
 你可以把它当作一个安静的“侦察兵”，始终紧贴你的实际工作，默默帮你留意周遭的价值资讯。
 
-## 一行安装
+## 安装方式
+
+### 推荐：通过 PyPI 安装
+
+GoodToKnow 现在以 PyPI 上发布的 `goodtoknow-gtn` 包作为正式安装入口。推荐用户路径是：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/qzzqzzb/good-to-know/main/scripts/install_gtn.sh | bash
+uv pip install goodtoknow-gtn
+gtn setup
 ```
 
-这会把发布后的 `goodtoknow-gtn` 包安装进本地虚拟环境，写入本地 `gtn` wrapper，并在 `~/.gtn` 下初始化一个属于当前用户的 runtime。
+现在 `gtn setup` 会直接在 CLI 内完成首次引导：
+
+- 在 `~/.gtn` 下初始化 GTN runtime
+- 交互式询问可选的 Notion 输出配置
+- 交互式询问可选的初始用户 profile
+
+如果 `pip install` 之后你的环境里还没有 `gtn` 命令，就需要直接通过该 Python 环境运行，或者把该环境的脚本目录加入 `PATH`。
+
+### 从源码安装
+
+如果你是要测试本地改动，或者直接从源码开发 GoodToKnow，可以这样：
+
+```bash
+git clone https://github.com/qzzqzzb/good-to-know.git
+cd good-to-know
+uv build
+uv pip install --upgrade --force-reinstall dist/goodtoknow_gtn-*.whl
+gtn setup
+```
+
+如果你想放进一个单独的本地虚拟环境里开发：
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install --upgrade --force-reinstall dist/goodtoknow_gtn-*.whl
+gtn setup
+```
 
 ## GoodToKnow 是什么
 

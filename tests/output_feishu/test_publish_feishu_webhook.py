@@ -120,6 +120,28 @@ class PublishFeishuWebhookTests(unittest.TestCase):
         self.assertIn("succeeded", message)
         self.assertEqual(details["transport"], "curl")
 
+    def test_publish_message_falls_back_to_curl_on_name_resolution_failure(self) -> None:
+        def failing_urlopen(req, timeout=20):
+            raise error.URLError("[Errno 8] nodename nor servname provided, or not known")
+
+        def fake_run(command, capture_output=True, text=True, check=False):
+            output_index = command.index("-o") + 1
+            response_path = Path(command[output_index])
+            response_path.write_text('{"code":0,"msg":"success","data":{}}', encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "200", "")
+
+        state, message, details = module.publish_message(
+            "https://example.com/hook",
+            {"msg_type": "text", "content": {"text": "hello"}},
+            urlopen_func=failing_urlopen,
+            curl_path_resolver=lambda name: "/usr/bin/curl",
+            run_func=fake_run,
+        )
+
+        self.assertEqual(state, "success")
+        self.assertIn("succeeded", message)
+        self.assertEqual(details["transport"], "curl")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -238,6 +238,93 @@ class StatusTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("No run yet", output)
 
+    def test_run_prints_summary_when_runner_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            (runtime_repo / "bootstrap").mkdir(parents=True)
+            (runtime_repo / "bootstrap" / "stack.yaml").write_text("run_output_dir: runs\n", encoding="utf-8")
+            (runtime_repo / "output" / "notion-briefing").mkdir(parents=True)
+            (runtime_repo / "output" / "notion-briefing" / "settings.json").write_text("{}", encoding="utf-8")
+            (root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "runtime_repo_path": str(runtime_repo),
+                        "codex_path": "/bin/echo",
+                        "launch_agent_path": str(root / "com.goodtoknow.gtn.plist"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def boom(*args, **kwargs):
+                raise OSError("boom")
+
+            buf = io.StringIO()
+            with (
+                patch("runtime.gtn_local_product.cli.run_once", return_value=16),
+                patch.object(cli, "latest_app_run") as latest_app_run,
+                redirect_stdout(buf),
+            ):
+                run_dir = root / "runs" / "run-1"
+                run_dir.mkdir(parents=True)
+                (run_dir / "result.json").write_text(
+                    json.dumps({"state": "failed", "message": "boom", "details": {}}),
+                    encoding="utf-8",
+                )
+                latest_app_run.return_value = run_dir
+                rc = cli.main(["--root", str(root), "run"])
+
+            self.assertEqual(rc, 16)
+            output = buf.getvalue()
+            self.assertIn("Run Failed", output)
+            self.assertIn("boom", output)
+
+    def test_run_prints_partial_success_phase_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            (runtime_repo / "bootstrap").mkdir(parents=True)
+            (runtime_repo / "bootstrap" / "stack.yaml").write_text("run_output_dir: runs\n", encoding="utf-8")
+            (runtime_repo / "output" / "notion-briefing").mkdir(parents=True)
+            (runtime_repo / "output" / "notion-briefing" / "settings.json").write_text("{}", encoding="utf-8")
+            (root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "runtime_repo_path": str(runtime_repo),
+                        "codex_path": "/bin/echo",
+                        "launch_agent_path": str(root / "com.goodtoknow.gtn.plist"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            run_dir = root / "runs" / "run-1"
+            run_dir.mkdir(parents=True)
+            (run_dir / "result.json").write_text(
+                json.dumps(
+                    {
+                        "state": "partial_success",
+                        "message": "Notion succeeded; Feishu failed",
+                        "details": {
+                            "discovery_findings": 4,
+                            "notion": {"state": "success", "pages_created": 4},
+                            "feishu": {"state": "failed", "reason": "dns"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with patch("runtime.gtn_local_product.cli.run_once", return_value=10), patch.object(cli, "latest_app_run", return_value=run_dir), redirect_stdout(buf):
+                rc = cli.main(["--root", str(root), "run"])
+
+            self.assertEqual(rc, 10)
+            output = buf.getvalue()
+            self.assertIn("Run Partial Success", output)
+            self.assertIn("Discovery", output)
+            self.assertIn("Notion", output)
+            self.assertIn("Feishu", output)
+
     def test_exit_code_for_failed_state_is_nonzero(self) -> None:
         self.assertEqual(exit_code_for_state(ResultState.SUCCESS), 0)
         self.assertNotEqual(exit_code_for_state(ResultState.FAILED), 0)
@@ -299,6 +386,83 @@ class StatusTests(unittest.TestCase):
             self.assertEqual(state["runtime_bundle_url"], "")
             self.assertTrue((packaged_runtime / "bootstrap" / "stack.yaml").is_symlink())
             self.assertFalse((packaged_runtime / "output" / "notion-briefing" / "settings.json").is_symlink())
+
+    def test_init_can_apply_onboarding_flags_without_install_script(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            root = tmp_path / ".gtn"
+
+            with (
+                patch.object(cli, "resolve_codex_executable", return_value=Path("/bin/echo")),
+                patch.object(cli, "record_initial_user_profile") as record_profile,
+            ):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = cli.main(
+                        [
+                            "--root",
+                            str(root),
+                            "setup",
+                        "--codex-path",
+                        "/bin/echo",
+                        "--notion-page-url",
+                        "https://notion.local/page",
+                        "--feishu-webhook-url",
+                        "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook",
+                        "--user-profile",
+                        "I care about agents and product systems.",
+                        "--no-prompt",
+                        ]
+                    )
+
+            self.assertEqual(rc, 0)
+            output = buf.getvalue()
+            packaged_runtime = root / "runtime" / "GoodToKnow"
+            notion_settings = json.loads(
+                (packaged_runtime / "output" / "notion-briefing" / "settings.json").read_text(encoding="utf-8")
+            )
+            feishu_settings = json.loads(
+                (packaged_runtime / "output" / "feishu-briefing" / "settings.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(notion_settings["parent_page_url"], "https://notion.local/page")
+            self.assertEqual(feishu_settings["webhook_url"], "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook")
+            self.assertIn("GTN Setup", output)
+            self.assertIn("Setup Summary", output)
+            self.assertIn("https://notion.local/page", output)
+            self.assertIn("https://open.feishu.cn/... (configured)", output)
+            self.assertNotIn("test-hook", output)
+            record_profile.assert_called_once()
+            args, _ = record_profile.call_args
+            self.assertEqual(Path(args[0]).resolve(), packaged_runtime.resolve())
+            self.assertEqual(args[1], "I care about agents and product systems.")
+
+    def test_setup_does_not_fail_when_profile_recording_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            root = tmp_path / ".gtn"
+
+            with (
+                patch.object(cli, "resolve_codex_executable", return_value=Path("/bin/echo")),
+                patch.object(cli, "record_initial_user_profile", side_effect=RuntimeError("profile backend unavailable")),
+            ):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = cli.main(
+                        [
+                            "--root",
+                            str(root),
+                            "setup",
+                            "--codex-path",
+                            "/bin/echo",
+                            "--user-profile",
+                            "I care about agents and product systems.",
+                            "--no-prompt",
+                        ]
+                    )
+
+            self.assertEqual(rc, 0)
+            output = buf.getvalue()
+            self.assertIn("Not recorded", output)
 
     def test_packaged_runtime_copies_mutable_files_but_links_immutable_assets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

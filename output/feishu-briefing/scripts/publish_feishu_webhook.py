@@ -38,12 +38,16 @@ def message_body_size(message: dict) -> int:
 
 def should_try_curl_fallback(reason: object) -> bool:
     text = str(reason)
-    ssl_markers = (
+    markers = (
         "CERTIFICATE_VERIFY_FAILED",
         "certificate verify failed",
         "self-signed certificate",
+        "nodename nor servname provided",
+        "Name or service not known",
+        "Temporary failure in name resolution",
+        "No address associated with hostname",
     )
-    return any(marker in text for marker in ssl_markers)
+    return any(marker in text for marker in markers)
 
 
 def publish_with_curl(

@@ -13,7 +13,11 @@ from urllib.request import urlopen
 from datetime import datetime, timezone
 from pathlib import Path
 
+from rich import box
 from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from .cadence import parse_cadence
 from .launchd import launch_agent_loaded, load_launch_agent, unload_launch_agent, write_launch_agent
@@ -191,10 +195,157 @@ def resolve_installed_gtn_wrapper() -> Path | None:
         return candidate.resolve()
     return None
 
+
+def update_notion_parent_page(runtime_repo: Path, page_url: str) -> None:
+    settings_path = runtime_repo / "output" / "notion-briefing" / "settings.json"
+    if not settings_path.exists():
+        return
+    payload = load_json(settings_path, {})
+    payload["parent_page_url"] = page_url
+    payload["database_url"] = ""
+    settings_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def update_feishu_webhook(runtime_repo: Path, webhook_url: str) -> None:
+    settings_path = runtime_repo / "output" / "feishu-briefing" / "settings.json"
+    if not settings_path.exists():
+        return
+    payload = load_json(settings_path, {})
+    payload["webhook_url"] = webhook_url
+    settings_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def summarize_feishu_webhook(webhook_url: str) -> str:
+    value = webhook_url.strip()
+    if not value:
+        return "Not configured"
+    if "://" in value:
+        scheme, remainder = value.split("://", 1)
+        host = remainder.split("/", 1)[0]
+        return f"{scheme}://{host}/... (configured)"
+    return "(configured)"
+
+
+def record_initial_user_profile(runtime_repo: Path, profile_text: str) -> None:
+    script_path = runtime_repo / "memory" / "mempalace-memory" / "scripts" / "record_user_profile.py"
+    if not script_path.exists():
+        return
+    result = subprocess.run(
+        [sys.executable, str(script_path), profile_text],
+        check=False,
+        cwd=runtime_repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "profile recorder failed").strip().splitlines()[-1]
+        raise RuntimeError(message)
+
+
+def prompt_multiline(prompt: str) -> str:
+    Console().print(prompt)
+    lines: list[str] = []
+    while True:
+        line = input().rstrip("\n")
+        if not line:
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def run_onboarding(
+    runtime_repo: Path,
+    notion_page_url: str | None,
+    feishu_webhook_url: str | None,
+    user_profile: str | None,
+    no_prompt: bool = False,
+) -> dict[str, str]:
+    interactive = sys.stdin.isatty() and not no_prompt
+    results = {
+        "notion": "Not configured",
+        "feishu": "Not configured",
+        "profile": "Not recorded",
+    }
+
+    effective_notion_page_url = (notion_page_url or "").strip()
+    if not effective_notion_page_url and interactive:
+        effective_notion_page_url = input(
+            "Optional Notion page URL for GTN output (leave blank to skip): "
+        ).strip()
+    if effective_notion_page_url:
+        update_notion_parent_page(runtime_repo, effective_notion_page_url)
+        results["notion"] = effective_notion_page_url
+
+    effective_feishu_webhook_url = (feishu_webhook_url or "").strip()
+    if not effective_feishu_webhook_url and interactive:
+        effective_feishu_webhook_url = input(
+            "Optional Feishu webhook URL for GTN output (leave blank to skip): "
+        ).strip()
+    if effective_feishu_webhook_url:
+        update_feishu_webhook(runtime_repo, effective_feishu_webhook_url)
+        results["feishu"] = summarize_feishu_webhook(effective_feishu_webhook_url)
+
+    effective_user_profile = (user_profile or "").strip()
+    if not effective_user_profile and interactive:
+        effective_user_profile = prompt_multiline(
+            "\nOptional profile setup\n"
+            "----------------------\n"
+            "Describe yourself in a few lines so GoodToKnow can make better recommendations.\n"
+            "Include your interests, the work you do on this computer, and recurring topics you care about.\n"
+            "Finish by entering an empty line."
+        )
+    if effective_user_profile:
+        try:
+            record_initial_user_profile(runtime_repo, effective_user_profile)
+        except (subprocess.CalledProcessError, RuntimeError) as exc:
+            results["profile"] = f"Not recorded ({exc})"
+        else:
+            results["profile"] = "Recorded"
+    return results
+
+
+def render_setup_banner(console: Console, paths: GTNPaths) -> None:
+    title = Text()
+    title.append("🚀 GTN Setup", style="bold bright_cyan")
+    title.append("  first-time local bootstrap", style="dim")
+    console.print(
+        Panel(
+            title,
+            border_style="bright_cyan",
+            box=box.ROUNDED,
+            padding=(0, 2),
+            subtitle=str(paths.root),
+        )
+    )
+
+
+def render_setup_summary(
+    console: Console,
+    paths: GTNPaths,
+    runtime_repo: Path,
+    codex_path: str,
+    runtime_bundle_url: str,
+    onboarding: dict[str, str],
+) -> None:
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold cyan", justify="right")
+    table.add_column()
+    table.add_row("GTN home", str(paths.root))
+    table.add_row("Runtime", str(runtime_repo))
+    table.add_row("Codex", codex_path)
+    if runtime_bundle_url:
+        table.add_row("Bundle", runtime_bundle_url)
+    table.add_row("Notion", onboarding["notion"])
+    table.add_row("Feishu", onboarding["feishu"])
+    table.add_row("Profile", onboarding["profile"])
+    console.print(Panel(table, title="Setup Summary", border_style="green", box=box.ROUNDED))
+
 def cmd_init(args: argparse.Namespace) -> int:
+    console = Console()
     paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
     ensure_directories(paths)
     codex_path = str(resolve_codex_executable(args.codex_path))
+    render_setup_banner(console, paths)
     runtime_bundle_url = ""
     if args.runtime_repo:
         runtime_repo = Path(args.runtime_repo).expanduser().resolve()
@@ -213,18 +364,85 @@ def cmd_init(args: argparse.Namespace) -> int:
     state.codex_path = codex_path
     state.launch_agent_path = str(paths.launch_agent_path)
     save_state(paths, state)
-    print(f"Initialized GTN state at {paths.root}")
-    print(f"runtime_repo={runtime_repo}")
-    if runtime_bundle_url:
-        print(f"runtime_bundle_url={runtime_bundle_url}")
-    print(f"codex_path={codex_path}")
+    onboarding = run_onboarding(
+        runtime_repo=runtime_repo,
+        notion_page_url=getattr(args, "notion_page_url", None),
+        feishu_webhook_url=getattr(args, "feishu_webhook_url", None),
+        user_profile=getattr(args, "user_profile", None),
+        no_prompt=bool(getattr(args, "no_prompt", False)),
+    )
+    render_setup_summary(
+        console=console,
+        paths=paths,
+        runtime_repo=runtime_repo,
+        codex_path=codex_path,
+        runtime_bundle_url=runtime_bundle_url,
+        onboarding=onboarding,
+    )
     return 0
+
+
+def latest_app_run(paths: GTNPaths) -> Path | None:
+    runs = sorted(path for path in paths.runs_dir.iterdir() if path.is_dir()) if paths.runs_dir.exists() else []
+    return runs[-1] if runs else None
+
+
+def print_run_summary(paths: GTNPaths, exit_code: int) -> None:
+    latest = latest_app_run(paths)
+    if latest is None:
+        return
+    result_path = latest / "result.json"
+    payload = load_json(result_path, {}) if result_path.exists() else {}
+    state = str(payload.get("state", "unknown")).strip() or "unknown"
+    message = str(payload.get("message", "")).strip() or "(no message)"
+    details = payload.get("details", {}) if isinstance(payload.get("details", {}), dict) else {}
+    notion = details.get("notion", {}) if isinstance(details.get("notion", {}), dict) else {}
+    feishu = details.get("feishu", {}) if isinstance(details.get("feishu", {}), dict) else {}
+    discovery_count = details.get("discovery_findings")
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold cyan", justify="right")
+    table.add_column()
+    table.add_row("State", state)
+    table.add_row("Message", message)
+    if discovery_count is not None:
+        table.add_row("Discovery", f"{discovery_count} finding(s)")
+    if notion:
+        notion_status = str(notion.get("state", "unknown"))
+        notion_pages = notion.get("pages_created")
+        if notion_pages is not None:
+            notion_status = f"{notion_status} ({notion_pages} page(s))"
+        table.add_row("Notion", notion_status)
+    if feishu:
+        feishu_status = str(feishu.get("state", "unknown"))
+        if feishu.get("reason"):
+            feishu_status = f"{feishu_status}: {feishu['reason']}"
+        table.add_row("Feishu", feishu_status)
+    table.add_row("Run dir", str(latest))
+    if details.get("stdout_log"):
+        table.add_row("Stdout", str(details["stdout_log"]))
+    if details.get("stderr_log"):
+        table.add_row("Stderr", str(details["stderr_log"]))
+
+    if state == "success":
+        border = "green"
+        title = "Run Complete"
+    elif state == "partial_success":
+        border = "yellow"
+        title = "Run Partial Success"
+    else:
+        border = "red"
+        title = "Run Failed"
+    Console().print(Panel(table, title=title, border_style=border, box=box.ROUNDED))
+
 
 def cmd_run(args: argparse.Namespace) -> int:
     paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
     state = load_state(paths)
     require_initialized_runtime(state)
-    return run_once(paths, state, scheduled=args.scheduled)
+    rc = run_once(paths, state, scheduled=args.scheduled)
+    print_run_summary(paths, rc)
+    return rc
 
 def cmd_freq(args: argparse.Namespace) -> int:
     paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
@@ -421,11 +639,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", help="Override GTN home directory (default: ~/.gtn)")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    def add_setup_arguments(command_parser: argparse.ArgumentParser) -> None:
+        command_parser.add_argument("--runtime-repo")
+        command_parser.add_argument("--runtime-bundle-url")
+        command_parser.add_argument("--codex-path")
+        command_parser.add_argument("--notion-page-url", help="Optional Notion page URL for first-time output setup")
+        command_parser.add_argument("--feishu-webhook-url", help="Optional Feishu webhook URL for first-time output setup")
+        command_parser.add_argument("--user-profile", help="Optional free-form user profile text to seed GTN memory")
+        command_parser.add_argument("--no-prompt", action="store_true", help="Skip interactive onboarding prompts")
+        command_parser.set_defaults(func=cmd_init)
+
     init_parser = subparsers.add_parser("init", help=argparse.SUPPRESS)
-    init_parser.add_argument("--runtime-repo")
-    init_parser.add_argument("--runtime-bundle-url")
-    init_parser.add_argument("--codex-path")
-    init_parser.set_defaults(func=cmd_init)
+    add_setup_arguments(init_parser)
+
+    setup_parser = subparsers.add_parser("setup", help="Initialize GTN state and run first-time onboarding")
+    add_setup_arguments(setup_parser)
 
     run_parser = subparsers.add_parser("run", help="Run GoodToKnow now")
     run_parser.add_argument("--scheduled", action="store_true", help=argparse.SUPPRESS)
