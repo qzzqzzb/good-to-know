@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.resources as pkg_resources
 import json
 import shutil
 import subprocess
@@ -26,6 +27,7 @@ PRESERVED_RUNTIME_STATE_PATHS = frozenset(
         "context/naive-context/outbox.md",
         "context/naive-context/settings.json",
         "discovery/web-discovery/outbox.md",
+        "memory/mempalace-memory/.data",
         "memory/mempalace-memory/identity.md",
         "memory/naive-memory/external_findings.md",
         "memory/naive-memory/user_context.md",
@@ -56,6 +58,26 @@ def save_state(paths: GTNPaths, state: StateData) -> None:
 
 def resolve_runtime_bundle_url(explicit_url: str | None = None) -> str:
     return explicit_url or DEFAULT_RUNTIME_BUNDLE_URL
+
+
+def runtime_uses_git_checkout(runtime_repo: Path) -> bool:
+    return (runtime_repo / ".git").exists()
+
+
+def copy_tree(source, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    for item in source.iterdir():
+        target = destination / item.name
+        if item.is_dir():
+            copy_tree(item, target)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(item.read_bytes())
+
+
+def is_mutable_runtime_path(relative_path: Path) -> bool:
+    rel = relative_path.as_posix()
+    return any(rel == prefix or rel.startswith(f"{prefix}/") for prefix in PRESERVED_RUNTIME_STATE_PATHS)
 
 
 def download_runtime_bundle(bundle_url: str, destination_dir: Path) -> Path:
@@ -96,6 +118,36 @@ def hydrate_runtime_bundle(runtime_repo: Path, bundle_url: str) -> Path:
             shutil.rmtree(runtime_repo)
         runtime_repo.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(extracted_root, runtime_repo)
+    return runtime_repo.resolve()
+
+
+def hydrate_packaged_runtime(runtime_repo: Path) -> Path:
+    source_root = Path(str(pkg_resources.files("runtime.gtn_local_product").joinpath("resources/default_runtime")))
+    if not source_root.is_dir():
+        raise SystemExit("Installed GTN package does not contain the default runtime resources.")
+    if runtime_repo.exists():
+        shutil.rmtree(runtime_repo)
+    runtime_repo.parent.mkdir(parents=True, exist_ok=True)
+    runtime_repo.mkdir(parents=True, exist_ok=True)
+
+    # Mutable state/config files are copied into GTN_HOME; immutable defaults stay linked
+    # back to the installed package so the package remains the primary source of truth.
+    for source_path in sorted(source_root.rglob("*")):
+        relative = source_path.relative_to(source_root)
+        target = runtime_repo / relative
+        if source_path.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if is_mutable_runtime_path(relative):
+            target.write_bytes(source_path.read_bytes())
+        else:
+            target.symlink_to(source_path)
+
+    for relative in sorted(PRESERVED_RUNTIME_STATE_PATHS):
+        target = runtime_repo / relative
+        if "." not in Path(relative).name:
+            target.mkdir(parents=True, exist_ok=True)
     return runtime_repo.resolve()
 
 
@@ -143,9 +195,11 @@ def cmd_init(args: argparse.Namespace) -> int:
             raise SystemExit(f"Runtime repo does not exist: {runtime_repo}")
         if not (runtime_repo / "bootstrap" / "stack.yaml").exists():
             raise SystemExit(f"Runtime repo does not look initialized: missing bootstrap/stack.yaml in {runtime_repo}")
-    else:
+    elif args.runtime_bundle_url:
         runtime_bundle_url = resolve_runtime_bundle_url(args.runtime_bundle_url)
         runtime_repo = hydrate_runtime_bundle(paths.runtime_dir, runtime_bundle_url)
+    else:
+        runtime_repo = hydrate_packaged_runtime(paths.runtime_dir)
     state = load_state(paths)
     state.runtime_repo_path = str(runtime_repo)
     state.runtime_bundle_url = runtime_bundle_url
@@ -282,6 +336,13 @@ def cmd_update(args: argparse.Namespace) -> int:
         run_id = lock.get("run_id", "(unknown)")
         raise SystemExit(f"Cannot update while a GTN run is active (run_id={run_id}).")
 
+    packaged_runtime_mode = not state.runtime_bundle_url and not runtime_uses_git_checkout(runtime_repo)
+    if packaged_runtime_mode:
+        python_hint = paths.root / ".venv" / "bin" / "python"
+        print("GTN now expects package-manager-native upgrades.")
+        print(f"Use: uv pip install --python {python_hint} --upgrade goodtoknow-gtn")
+        return 0
+
     if state.runtime_bundle_url:
         snapshots = snapshot_runtime_state_files(runtime_repo)
         preserved_count = len(snapshots)
@@ -296,11 +357,14 @@ def cmd_update(args: argparse.Namespace) -> int:
             bundle_url = resolve_runtime_bundle_url(state.runtime_bundle_url)
             hydrate_runtime_bundle(runtime_repo, bundle_url)
             restore_runtime_state_snapshots(runtime_repo, snapshots)
-        else:
+        elif runtime_uses_git_checkout(runtime_repo):
             subprocess.run(["git", "-C", str(runtime_repo), "pull", "--ff-only"], check=True)
+        else:
+            hydrate_packaged_runtime(runtime_repo)
+            restore_runtime_state_snapshots(runtime_repo, snapshots)
         install_runtime_editable(runtime_repo)
     finally:
-        if not state.runtime_bundle_url:
+        if not state.runtime_bundle_url and not packaged_runtime_mode and runtime_uses_git_checkout(runtime_repo):
             restore_runtime_state_snapshots(runtime_repo, snapshots)
 
     if preserved_count:
@@ -331,6 +395,7 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
         shutil.rmtree(paths.root)
 
     print(f"Uninstalled GTN from {paths.root}")
+    print("If the goodtoknow-gtn package is still installed, remove it with: uv pip uninstall goodtoknow-gtn")
     return 0
 
 def latest_result(paths: GTNPaths) -> tuple[dict | None, Path | None]:

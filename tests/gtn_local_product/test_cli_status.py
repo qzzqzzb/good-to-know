@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -161,6 +162,46 @@ class StatusTests(unittest.TestCase):
             self.assertTrue((runtime_repo / "bootstrap" / "stack.yaml").exists())
             state = json.loads((root / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["runtime_bundle_url"], bundle_path.as_uri())
+
+    def test_init_can_hydrate_runtime_from_packaged_resources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            root = tmp_path / ".gtn"
+
+            with patch.object(cli, "resolve_codex_executable", return_value=Path("/bin/echo")):
+                rc = cli.main(
+                    [
+                        "--root",
+                        str(root),
+                        "init",
+                        "--codex-path",
+                        "/bin/echo",
+                    ]
+                )
+
+            self.assertEqual(rc, 0)
+            packaged_runtime = root / "runtime" / "GoodToKnow"
+            state = json.loads((root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["runtime_repo_path"], str(packaged_runtime.resolve()))
+            self.assertEqual(state["runtime_bundle_url"], "")
+            self.assertTrue((packaged_runtime / "bootstrap" / "stack.yaml").is_symlink())
+            self.assertFalse((packaged_runtime / "output" / "notion-briefing" / "settings.json").is_symlink())
+
+    def test_packaged_runtime_copies_mutable_files_but_links_immutable_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            package_root = tmp_path / "package-root"
+            source_root = package_root / "resources" / "default_runtime"
+            self._seed_runtime_tree(source_root)
+            runtime_repo = tmp_path / "runtime"
+
+            with patch.object(cli.pkg_resources, "files", return_value=package_root):
+                hydrated = cli.hydrate_packaged_runtime(runtime_repo)
+
+            self.assertEqual(hydrated, runtime_repo.resolve())
+            self.assertFalse((runtime_repo / "output/notion-briefing/settings.json").is_symlink())
+            self.assertTrue((runtime_repo / "bootstrap/stack.yaml").is_symlink())
+            self.assertTrue((runtime_repo / "README.md").is_symlink())
 
     def test_update_refuses_when_lock_is_active(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -343,6 +384,39 @@ class StatusTests(unittest.TestCase):
 
             self.assertEqual(rc, 0)
             self.assertEqual((runtime_repo / "README.md").read_text(encoding="utf-8"), "new bundle\n")
+            self.assertEqual(
+                tracked_state.read_text(encoding="utf-8"),
+                "{\n  \"parent_page_url\": \"https://notion.local/page\"\n}\n",
+            )
+
+    def test_update_refreshes_packaged_runtime_and_preserves_state_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            root = tmp_path / ".gtn"
+            root.mkdir(parents=True, exist_ok=True)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            self._seed_runtime_tree(runtime_repo, readme_text="old packaged\n")
+            tracked_state = runtime_repo / "output" / "notion-briefing" / "settings.json"
+            tracked_state.write_text("{\n  \"parent_page_url\": \"https://notion.local/page\"\n}\n", encoding="utf-8")
+            (root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "runtime_repo_path": str(runtime_repo),
+                        "runtime_bundle_url": "",
+                        "codex_path": "/bin/echo",
+                        "launch_agent_path": str(root / "com.goodtoknow.gtn.plist"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli.main(["--root", str(root), "update"])
+
+            self.assertEqual(rc, 0)
+            self.assertIn("package-manager-native upgrades", buf.getvalue())
+            self.assertIn("goodtoknow-gtn", buf.getvalue())
+            self.assertEqual((runtime_repo / "README.md").read_text(encoding="utf-8"), "old packaged\n")
             self.assertEqual(
                 tracked_state.read_text(encoding="utf-8"),
                 "{\n  \"parent_page_url\": \"https://notion.local/page\"\n}\n",
