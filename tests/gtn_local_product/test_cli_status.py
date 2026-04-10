@@ -403,31 +403,41 @@ class StatusTests(unittest.TestCase):
                             "--root",
                             str(root),
                             "setup",
-                        "--codex-path",
-                        "/bin/echo",
-                        "--notion-page-url",
-                        "https://notion.local/page",
-                        "--feishu-webhook-url",
-                        "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook",
-                        "--user-profile",
-                        "I care about agents and product systems.",
-                        "--no-prompt",
+                            "--codex-path",
+                            "/bin/echo",
+                            "--tier",
+                            "deep",
+                            "--notion-page-url",
+                            "https://notion.local/page",
+                            "--feishu-webhook-url",
+                            "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook",
+                            "--user-profile",
+                            "I care about agents and product systems.",
+                            "--no-prompt",
                         ]
                     )
 
             self.assertEqual(rc, 0)
             output = buf.getvalue()
             packaged_runtime = root / "runtime" / "GoodToKnow"
+            state = json.loads((root / "state.json").read_text(encoding="utf-8"))
             notion_settings = json.loads(
                 (packaged_runtime / "output" / "notion-briefing" / "settings.json").read_text(encoding="utf-8")
             )
             feishu_settings = json.loads(
                 (packaged_runtime / "output" / "feishu-briefing" / "settings.json").read_text(encoding="utf-8")
             )
+            context_settings = json.loads(
+                (packaged_runtime / "context" / "naive-context" / "settings.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(state["tier"], "deep")
             self.assertEqual(notion_settings["parent_page_url"], "https://notion.local/page")
             self.assertEqual(feishu_settings["webhook_url"], "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook")
+            self.assertEqual(feishu_settings["max_items"], 40)
+            self.assertEqual(context_settings["features"]["agent_sessions"]["lookback_hours"], 336)
             self.assertIn("GTN Setup", output)
             self.assertIn("Setup Summary", output)
+            self.assertIn("deep", output)
             self.assertIn("https://notion.local/page", output)
             self.assertIn("https://open.feishu.cn/... (configured)", output)
             self.assertNotIn("test-hook", output)
@@ -463,6 +473,68 @@ class StatusTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             output = buf.getvalue()
             self.assertIn("Not recorded", output)
+
+    def test_config_get_and_set_support_tier_and_urls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            self._seed_runtime_tree(runtime_repo)
+            (root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "runtime_repo_path": str(runtime_repo),
+                        "codex_path": "/usr/local/bin/codex",
+                        "tier": "balanced",
+                        "launch_agent_path": str(root / "com.goodtoknow.gtn.plist"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli.main(["--root", str(root), "config", "set", "tier", "light"])
+            self.assertEqual(rc, 0)
+            self.assertIn("tier=light", buf.getvalue())
+
+            state = json.loads((root / "state.json").read_text(encoding="utf-8"))
+            context_settings = json.loads(
+                (runtime_repo / "context" / "naive-context" / "settings.json").read_text(encoding="utf-8")
+            )
+            feishu_settings = json.loads(
+                (runtime_repo / "output" / "feishu-briefing" / "settings.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(state["tier"], "light")
+            self.assertEqual(context_settings["features"]["browser_history"]["lookback_hours"], 24)
+            self.assertEqual(feishu_settings["max_items"], 10)
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli.main(["--root", str(root), "config", "set", "notion-page-url", "https://notion.local/page"])
+            self.assertEqual(rc, 0)
+            self.assertIn("notion-page-url=https://notion.local/page", buf.getvalue())
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli.main(
+                    [
+                        "--root",
+                        str(root),
+                        "config",
+                        "set",
+                        "feishu-webhook-url",
+                        "https://open.feishu.cn/open-apis/bot/v2/hook/test-hook",
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertIn("configured", buf.getvalue())
+            self.assertNotIn("test-hook", buf.getvalue())
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli.main(["--root", str(root), "config", "get", "tier"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "light")
 
     def test_packaged_runtime_copies_mutable_files_but_links_immutable_assets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -20,6 +20,16 @@ from rich.table import Table
 from rich.text import Text
 
 from .cadence import parse_cadence
+from .configuration import (
+    CONFIG_KEYS,
+    TIER_PRESETS,
+    apply_tier_to_runtime,
+    get_config_value,
+    normalize_tier,
+    set_feishu_webhook_url,
+    set_notion_page_url,
+    state_tier,
+)
 from .launchd import launch_agent_loaded, load_launch_agent, unload_launch_agent, write_launch_agent
 from .locks import STALE_LOCK_SECONDS, lock_status, load_lock
 from .models import StateData
@@ -195,26 +205,6 @@ def resolve_installed_gtn_wrapper() -> Path | None:
         return candidate.resolve()
     return None
 
-
-def update_notion_parent_page(runtime_repo: Path, page_url: str) -> None:
-    settings_path = runtime_repo / "output" / "notion-briefing" / "settings.json"
-    if not settings_path.exists():
-        return
-    payload = load_json(settings_path, {})
-    payload["parent_page_url"] = page_url
-    payload["database_url"] = ""
-    settings_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def update_feishu_webhook(runtime_repo: Path, webhook_url: str) -> None:
-    settings_path = runtime_repo / "output" / "feishu-briefing" / "settings.json"
-    if not settings_path.exists():
-        return
-    payload = load_json(settings_path, {})
-    payload["webhook_url"] = webhook_url
-    settings_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
 def summarize_feishu_webhook(webhook_url: str) -> str:
     value = webhook_url.strip()
     if not value:
@@ -255,6 +245,7 @@ def prompt_multiline(prompt: str) -> str:
 
 def run_onboarding(
     runtime_repo: Path,
+    tier: str,
     notion_page_url: str | None,
     feishu_webhook_url: str | None,
     user_profile: str | None,
@@ -262,10 +253,13 @@ def run_onboarding(
 ) -> dict[str, str]:
     interactive = sys.stdin.isatty() and not no_prompt
     results = {
+        "tier": tier,
         "notion": "Not configured",
         "feishu": "Not configured",
         "profile": "Not recorded",
     }
+
+    apply_tier_to_runtime(runtime_repo, tier)
 
     effective_notion_page_url = (notion_page_url or "").strip()
     if not effective_notion_page_url and interactive:
@@ -273,7 +267,7 @@ def run_onboarding(
             "Optional Notion page URL for GTN output (leave blank to skip): "
         ).strip()
     if effective_notion_page_url:
-        update_notion_parent_page(runtime_repo, effective_notion_page_url)
+        set_notion_page_url(runtime_repo, effective_notion_page_url)
         results["notion"] = effective_notion_page_url
 
     effective_feishu_webhook_url = (feishu_webhook_url or "").strip()
@@ -282,7 +276,7 @@ def run_onboarding(
             "Optional Feishu webhook URL for GTN output (leave blank to skip): "
         ).strip()
     if effective_feishu_webhook_url:
-        update_feishu_webhook(runtime_repo, effective_feishu_webhook_url)
+        set_feishu_webhook_url(runtime_repo, effective_feishu_webhook_url)
         results["feishu"] = summarize_feishu_webhook(effective_feishu_webhook_url)
 
     effective_user_profile = (user_profile or "").strip()
@@ -335,6 +329,7 @@ def render_setup_summary(
     table.add_row("Codex", codex_path)
     if runtime_bundle_url:
         table.add_row("Bundle", runtime_bundle_url)
+    table.add_row("Tier", onboarding["tier"])
     table.add_row("Notion", onboarding["notion"])
     table.add_row("Feishu", onboarding["feishu"])
     table.add_row("Profile", onboarding["profile"])
@@ -362,10 +357,12 @@ def cmd_init(args: argparse.Namespace) -> int:
     state.runtime_repo_path = str(runtime_repo)
     state.runtime_bundle_url = runtime_bundle_url
     state.codex_path = codex_path
+    state.tier = normalize_tier(getattr(args, "tier", None))
     state.launch_agent_path = str(paths.launch_agent_path)
     save_state(paths, state)
     onboarding = run_onboarding(
         runtime_repo=runtime_repo,
+        tier=state.tier,
         notion_page_url=getattr(args, "notion_page_url", None),
         feishu_webhook_url=getattr(args, "feishu_webhook_url", None),
         user_profile=getattr(args, "user_profile", None),
@@ -443,6 +440,37 @@ def cmd_run(args: argparse.Namespace) -> int:
     rc = run_once(paths, state, scheduled=args.scheduled)
     print_run_summary(paths, rc)
     return rc
+
+
+def cmd_config_get(args: argparse.Namespace) -> int:
+    paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
+    state = load_state(paths)
+    runtime_repo = require_initialized_runtime(state)
+    value = get_config_value(runtime_repo, state, args.key)
+    print(value)
+    return 0
+
+
+def cmd_config_set(args: argparse.Namespace) -> int:
+    paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
+    state = load_state(paths)
+    runtime_repo = require_initialized_runtime(state)
+
+    if args.key == "tier":
+        state.tier = normalize_tier(args.value)
+        apply_tier_to_runtime(runtime_repo, state.tier)
+        save_state(paths, state)
+        print(f"tier={state.tier}")
+        return 0
+    if args.key == "notion-page-url":
+        set_notion_page_url(runtime_repo, args.value)
+        print(f"notion-page-url={args.value}")
+        return 0
+    if args.key == "feishu-webhook-url":
+        set_feishu_webhook_url(runtime_repo, args.value)
+        print(f"feishu-webhook-url={summarize_feishu_webhook(args.value)}")
+        return 0
+    raise SystemExit(f"Unsupported config key '{args.key}'")
 
 def cmd_freq(args: argparse.Namespace) -> int:
     paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
@@ -643,6 +671,7 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("--runtime-repo")
         command_parser.add_argument("--runtime-bundle-url")
         command_parser.add_argument("--codex-path")
+        command_parser.add_argument("--tier", choices=sorted(TIER_PRESETS), default=state_tier(StateData()), help="Unified GTN monitoring/density tier")
         command_parser.add_argument("--notion-page-url", help="Optional Notion page URL for first-time output setup")
         command_parser.add_argument("--feishu-webhook-url", help="Optional Feishu webhook URL for first-time output setup")
         command_parser.add_argument("--user-profile", help="Optional free-form user profile text to seed GTN memory")
@@ -654,6 +683,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     setup_parser = subparsers.add_parser("setup", help="Initialize GTN state and run first-time onboarding")
     add_setup_arguments(setup_parser)
+
+    config_parser = subparsers.add_parser("config", help="Read or update high-level GTN configuration")
+    config_subparsers = config_parser.add_subparsers(dest="config_command", required=True)
+
+    config_get_parser = config_subparsers.add_parser("get", help="Read a GTN config value")
+    config_get_parser.add_argument("key", choices=CONFIG_KEYS)
+    config_get_parser.set_defaults(func=cmd_config_get)
+
+    config_set_parser = config_subparsers.add_parser("set", help="Update a GTN config value")
+    config_set_parser.add_argument("key", choices=CONFIG_KEYS)
+    config_set_parser.add_argument("value")
+    config_set_parser.set_defaults(func=cmd_config_set)
 
     run_parser = subparsers.add_parser("run", help="Run GoodToKnow now")
     run_parser.add_argument("--scheduled", action="store_true", help=argparse.SUPPRESS)

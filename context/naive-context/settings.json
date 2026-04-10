@@ -4,7 +4,8 @@
       "enabled": true,
       "lookback_hours": 168,
       "max_entries": 50,
-      "max_observations_per_session": 3,
+      "max_observations_per_session": 6,
+      "observation_tier": "balanced",
       "providers": ["codex", "claude"],
       "include_codex_subagents": false,
       "include_non_edit_sessions": true

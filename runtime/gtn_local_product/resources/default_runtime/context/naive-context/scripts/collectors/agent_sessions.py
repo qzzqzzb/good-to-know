@@ -233,6 +233,7 @@ def _collect_codex_session_observations(
     include_subagents: bool,
     include_non_edit_sessions: bool,
     max_observations_per_session: int,
+    observation_tier: str,
 ) -> list[dict]:
     session_id: Optional[str] = None
     cwd: Optional[str] = None
@@ -242,6 +243,7 @@ def _collect_codex_session_observations(
     first_user_message: Optional[str] = None
     current_episode: Optional[Episode] = None
     episodes: list[Episode] = []
+    line_count = 0
 
     def finalize_episode() -> None:
         nonlocal current_episode
@@ -252,6 +254,8 @@ def _collect_codex_session_observations(
 
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for line in handle:
+            if line.strip():
+                line_count += 1
             try:
                 item = json.loads(line)
             except json.JSONDecodeError:
@@ -332,7 +336,8 @@ def _collect_codex_session_observations(
         return []
 
     if episodes:
-        return [_episode_to_observation(episode) for episode in episodes[:max_observations_per_session]]
+        cap = min(max_observations_per_session, scaled_session_observation_cap(line_count, observation_tier))
+        return [_episode_to_observation(episode) for episode in episodes[:cap]]
 
     if include_non_edit_sessions and first_user_message:
         return [_build_session_summary_observation("codex", session_id, cwd, path, started_at, first_user_message)]
@@ -345,6 +350,7 @@ def _collect_claude_session_observations(
     lookback_hours: int,
     include_non_edit_sessions: bool,
     max_observations_per_session: int,
+    observation_tier: str,
 ) -> list[dict]:
     session_id: Optional[str] = None
     cwd: Optional[str] = None
@@ -353,6 +359,7 @@ def _collect_claude_session_observations(
     first_user_message: Optional[str] = None
     current_episode: Optional[Episode] = None
     episodes: list[Episode] = []
+    line_count = 0
 
     def finalize_episode() -> None:
         nonlocal current_episode
@@ -363,6 +370,8 @@ def _collect_claude_session_observations(
 
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for line in handle:
+            if line.strip():
+                line_count += 1
             try:
                 item = json.loads(line)
             except json.JSONDecodeError:
@@ -448,7 +457,8 @@ def _collect_claude_session_observations(
         return []
 
     if episodes:
-        return [_episode_to_observation(episode) for episode in episodes[:max_observations_per_session]]
+        cap = min(max_observations_per_session, scaled_session_observation_cap(line_count, observation_tier))
+        return [_episode_to_observation(episode) for episode in episodes[:cap]]
 
     if include_non_edit_sessions and first_user_message:
         return [_build_session_summary_observation("claude", session_id, cwd, path, started_at, first_user_message)]
@@ -456,10 +466,36 @@ def _collect_claude_session_observations(
     return []
 
 
+def base_session_observation_cap(line_count: int) -> int:
+    if line_count <= 120:
+        return 1
+    if line_count <= 300:
+        return 2
+    if line_count <= 600:
+        return 3
+    if line_count <= 1000:
+        return 4
+    if line_count <= 1600:
+        return 5
+    return 6
+
+
+def scaled_session_observation_cap(line_count: int, observation_tier: str) -> int:
+    offsets = {
+        "light": -1,
+        "balanced": 0,
+        "deep": 1,
+    }
+    base = base_session_observation_cap(line_count)
+    adjusted = base + offsets.get(str(observation_tier).strip().lower(), 0)
+    return max(1, min(adjusted, 6))
+
+
 def collect_agent_session_observations(config: dict) -> List[dict]:
     lookback_hours = int(config.get("lookback_hours", 72))
     max_entries = int(config.get("max_entries", 12))
-    max_observations_per_session = int(config.get("max_observations_per_session", 3))
+    max_observations_per_session = int(config.get("max_observations_per_session", 6))
+    observation_tier = str(config.get("observation_tier", "balanced")).strip().lower() or "balanced"
     providers = set(config.get("providers", ["codex", "claude"]))
     include_subagents = bool(config.get("include_codex_subagents", False))
     include_non_edit_sessions = bool(config.get("include_non_edit_sessions", True))
@@ -476,6 +512,7 @@ def collect_agent_session_observations(config: dict) -> List[dict]:
                     include_subagents=include_subagents,
                     include_non_edit_sessions=include_non_edit_sessions,
                     max_observations_per_session=max_observations_per_session,
+                    observation_tier=observation_tier,
                 )
             )
 
@@ -491,6 +528,7 @@ def collect_agent_session_observations(config: dict) -> List[dict]:
                     lookback_hours=lookback_hours,
                     include_non_edit_sessions=include_non_edit_sessions,
                     max_observations_per_session=max_observations_per_session,
+                    observation_tier=observation_tier,
                 )
             )
 

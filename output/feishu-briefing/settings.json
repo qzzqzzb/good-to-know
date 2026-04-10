@@ -2,5 +2,5 @@
   "webhook_url": "",
   "message_title": "GoodToKnow Briefing",
   "required_keyword": "",
-  "max_items": 5
+  "max_items": 20
 }

@@ -32,6 +32,7 @@ class StateData:
     runtime_bundle_url: str = ""
     codex_path: str = ""
     cadence: str = ""
+    tier: str = "balanced"
     enabled: bool = False
     launch_agent_label: str = "com.goodtoknow.gtn"
     launch_agent_path: str = ""

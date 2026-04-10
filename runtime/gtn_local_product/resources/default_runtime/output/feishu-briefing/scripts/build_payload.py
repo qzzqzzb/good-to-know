@@ -7,8 +7,8 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 SETTINGS_PATH = SKILL_DIR / "settings.json"
-DEFAULT_MAX_ITEMS = 5
-MAX_ITEMS_UPPER_BOUND = 20
+DEFAULT_MAX_ITEMS = 20
+MAX_ITEMS_UPPER_BOUND = 50
 MAX_REQUEST_BODY_BYTES = 20_000
 
 
