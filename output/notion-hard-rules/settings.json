@@ -1,0 +1,16 @@
+{
+  "database_name": "GTN Intended Recommendations",
+  "database_url": "",
+  "parent_page_url": "",
+  "visible_properties": {
+    "title": "Title",
+    "url": "URL",
+    "source": "Source",
+    "topic": "Topic",
+    "published_at": "Published At",
+    "summary": "Summary"
+  },
+  "hidden_properties": {
+    "dedup_key": "Dedup Key"
+  }
+}

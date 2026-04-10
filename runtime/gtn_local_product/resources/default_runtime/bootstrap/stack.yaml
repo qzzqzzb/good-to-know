@@ -7,4 +7,6 @@ discovery_skills:
 output_skills:
   - output/notion-briefing
   - output/feishu-briefing
+  - output/notion-hard-rules
+  - output/feishu-hard-rules
 run_output_dir: runs

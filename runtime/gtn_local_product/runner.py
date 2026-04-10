@@ -58,8 +58,18 @@ def default_subprocess_runner(
         return subprocess.run(command, cwd=cwd, stdin=prompt_handle, stdout=out, stderr=err, text=True, check=False)
 
 
-def build_codex_command(codex_path: Path, runtime_repo: Path, app_run_dir: Path, last_message_path: Path) -> list[str]:
-    return [
+def build_codex_command(
+    codex_path: Path,
+    runtime_repo: Path,
+    app_run_dir: Path,
+    last_message_path: Path,
+    gtn_home: Path | None = None,
+) -> list[str]:
+    command: list[str] = []
+    if gtn_home is not None:
+        command.extend(["env", f"GTN_HOME={gtn_home}"])
+    command.extend(
+        [
         str(codex_path),
         "--search",
         "exec",
@@ -73,7 +83,9 @@ def build_codex_command(codex_path: Path, runtime_repo: Path, app_run_dir: Path,
         "-o",
         str(last_message_path),
         "-",
-    ]
+        ]
+    )
+    return command
 
 def resolve_codex_executable(explicit_path: str | None) -> Path:
     if explicit_path:
@@ -184,114 +196,116 @@ def run_once(paths: GTNPaths, state_data: StateData, scheduled: bool = False, ru
     final_state: ResultState | None = None
 
     try:
-        acquire_lock(paths.lock_file, lock)
-        lock_acquired = True
-    except ActiveRunError as exc:
-        final_state = ResultState.FAILED_PREFLIGHT
-        final_result_payload = {
-            "state": final_state.value,
-            "message": str(exc),
-            "updated_at": now_iso(),
-            "details": {"lock": exc.lock},
-        }
-        write_result(result_path, final_state, str(exc), {"lock": exc.lock})
-        manifest.state = final_state.value
-        manifest.error = str(exc)
-        manifest.finished_at = now_iso()
-        write_manifest(manifest_path, manifest)
-        exit_code = 2
-    except StaleLockError as exc:
-        final_state = ResultState.FAILED_PREFLIGHT
-        final_result_payload = {
-            "state": final_state.value,
-            "message": str(exc),
-            "updated_at": now_iso(),
-            "details": {"lock": exc.lock},
-        }
-        write_result(result_path, final_state, str(exc), {"lock": exc.lock})
-        manifest.state = final_state.value
-        manifest.error = str(exc)
-        manifest.finished_at = now_iso()
-        write_manifest(manifest_path, manifest)
-        exit_code = 3
-
-    if exit_code == 0:
         try:
-            codex_path = resolve_codex_executable(state_data.codex_path)
-            ensure_codex_auth()
-            ensure_search_capability(codex_path)
-            ensure_notion_config(runtime_repo)
-            prompt_path.write_text(render_prompt(runtime_repo, repo_run_dir, app_run_dir, run_id), encoding="utf-8")
-
-            command = build_codex_command(codex_path, runtime_repo, app_run_dir, last_message_path)
-            process_runner = runner or default_subprocess_runner
-            result = process_runner(command, runtime_repo, stdout_path, stderr_path, prompt_path)
-
-            details = {
-                "returncode": result.returncode,
-                "repo_run_dir": str(repo_run_dir),
-                "stdout_log": str(stdout_path),
-                "stderr_log": str(stderr_path),
-            }
-            inner_state, inner_payload = read_result_state(result_path)
-            if inner_state is not None:
-                state = inner_state
-                message = str((inner_payload or {}).get("message", "Codex batch run finished"))
-                details["inner_result"] = inner_payload
-                final_result_payload = inner_payload
-            elif result.returncode == 0:
-                state = ResultState.SUCCESS if repo_run_dir.exists() else ResultState.PARTIAL_SUCCESS
-                message = "Codex batch run finished"
-                write_result(result_path, state, message, details)
-                final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
-            else:
-                state = ResultState.FAILED
-                message = f"Codex batch run failed with return code {result.returncode}"
-                write_result(result_path, state, message, details)
-                final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
-            final_state = state
-            manifest.state = state.value
-            manifest.finished_at = now_iso()
-            manifest.details = details
-            write_manifest(manifest_path, manifest)
-            exit_code = exit_code_for_state(state)
-        except PreflightError as exc:
-            final_state = exc.state
-            final_result_payload = {
-                "state": exc.state.value,
-                "message": str(exc),
-                "updated_at": now_iso(),
-                "details": {},
-            }
-            write_result(result_path, exc.state, str(exc))
-            manifest.state = exc.state.value
-            manifest.error = str(exc)
-            manifest.finished_at = now_iso()
-            write_manifest(manifest_path, manifest)
-            exit_code = exit_code_for_state(exc.state)
-        except Exception as exc:
-            final_state = ResultState.FAILED
+            acquire_lock(paths.lock_file, lock)
+            lock_acquired = True
+        except ActiveRunError as exc:
+            final_state = ResultState.FAILED_PREFLIGHT
             final_result_payload = {
                 "state": final_state.value,
                 "message": str(exc),
                 "updated_at": now_iso(),
-                "details": {},
+                "details": {"lock": exc.lock},
             }
-            write_result(result_path, final_state, str(exc))
+            write_result(result_path, final_state, str(exc), {"lock": exc.lock})
             manifest.state = final_state.value
             manifest.error = str(exc)
             manifest.finished_at = now_iso()
             write_manifest(manifest_path, manifest)
-            exit_code = exit_code_for_state(final_state)
-    if final_result_payload is None and result_path.exists():
-        try:
-            final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            final_result_payload = None
-    if final_state is not None:
-        summary = build_run_summary(run_id, app_run_dir, final_result_payload, repo_run_dir=repo_run_dir)
-        write_run_summary(app_run_dir, summary)
-        update_history_with_summary(paths.status_history_file, summary)
-    if lock_acquired:
-        release_lock(paths.lock_file)
+            exit_code = 2
+        except StaleLockError as exc:
+            final_state = ResultState.FAILED_PREFLIGHT
+            final_result_payload = {
+                "state": final_state.value,
+                "message": str(exc),
+                "updated_at": now_iso(),
+                "details": {"lock": exc.lock},
+            }
+            write_result(result_path, final_state, str(exc), {"lock": exc.lock})
+            manifest.state = final_state.value
+            manifest.error = str(exc)
+            manifest.finished_at = now_iso()
+            write_manifest(manifest_path, manifest)
+            exit_code = 3
+
+        if exit_code == 0:
+            try:
+                codex_path = resolve_codex_executable(state_data.codex_path)
+                ensure_codex_auth()
+                ensure_search_capability(codex_path)
+                ensure_notion_config(runtime_repo)
+                prompt_path.write_text(render_prompt(runtime_repo, repo_run_dir, app_run_dir, run_id), encoding="utf-8")
+
+                command = build_codex_command(codex_path, runtime_repo, app_run_dir, last_message_path, gtn_home=paths.root)
+                process_runner = runner or default_subprocess_runner
+                result = process_runner(command, runtime_repo, stdout_path, stderr_path, prompt_path)
+
+                details = {
+                    "returncode": result.returncode,
+                    "repo_run_dir": str(repo_run_dir),
+                    "stdout_log": str(stdout_path),
+                    "stderr_log": str(stderr_path),
+                }
+                inner_state, inner_payload = read_result_state(result_path)
+                if inner_state is not None:
+                    state = inner_state
+                    message = str((inner_payload or {}).get("message", "Codex batch run finished"))
+                    details["inner_result"] = inner_payload
+                    final_result_payload = inner_payload
+                elif result.returncode == 0:
+                    state = ResultState.SUCCESS if repo_run_dir.exists() else ResultState.PARTIAL_SUCCESS
+                    message = "Codex batch run finished"
+                    write_result(result_path, state, message, details)
+                    final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+                else:
+                    state = ResultState.FAILED
+                    message = f"Codex batch run failed with return code {result.returncode}"
+                    write_result(result_path, state, message, details)
+                    final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+                final_state = state
+                manifest.state = state.value
+                manifest.finished_at = now_iso()
+                manifest.details = details
+                write_manifest(manifest_path, manifest)
+                exit_code = exit_code_for_state(state)
+            except PreflightError as exc:
+                final_state = exc.state
+                final_result_payload = {
+                    "state": exc.state.value,
+                    "message": str(exc),
+                    "updated_at": now_iso(),
+                    "details": {},
+                }
+                write_result(result_path, exc.state, str(exc))
+                manifest.state = exc.state.value
+                manifest.error = str(exc)
+                manifest.finished_at = now_iso()
+                write_manifest(manifest_path, manifest)
+                exit_code = exit_code_for_state(exc.state)
+            except Exception as exc:
+                final_state = ResultState.FAILED
+                final_result_payload = {
+                    "state": final_state.value,
+                    "message": str(exc),
+                    "updated_at": now_iso(),
+                    "details": {},
+                }
+                write_result(result_path, final_state, str(exc))
+                manifest.state = final_state.value
+                manifest.error = str(exc)
+                manifest.finished_at = now_iso()
+                write_manifest(manifest_path, manifest)
+                exit_code = exit_code_for_state(final_state)
+        if final_result_payload is None and result_path.exists():
+            try:
+                final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                final_result_payload = None
+        if final_state is not None:
+            summary = build_run_summary(run_id, app_run_dir, final_result_payload, repo_run_dir=repo_run_dir)
+            write_run_summary(app_run_dir, summary)
+            update_history_with_summary(paths.status_history_file, summary)
+    finally:
+        if lock_acquired:
+            release_lock(paths.lock_file)
     return exit_code

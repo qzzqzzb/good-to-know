@@ -11,6 +11,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 RUNTIME_DIR = SCRIPT_DIR.parent
 REPO_ROOT = RUNTIME_DIR.parent.parent
 STACK_PATH = REPO_ROOT / "bootstrap" / "stack.yaml"
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 
 def parse_stack(path: Path) -> dict:
@@ -162,12 +164,77 @@ def build_outputs(stack: dict, run_id: str | None = None, run_dir: Path | None =
 
     briefing_path = repo_run_dir / "briefing.json"
     for relative in stack.get("output_skills", []):
+        if "hard-rules" in str(relative):
+            continue
         skill_path = ensure_skill_path(str(relative))
         build_payload = resolve_output_builder(skill_path)
         if build_payload is not None:
             run_python(build_payload, str(briefing_path))
 
+    build_hard_rule_outputs(stack, repo_run_id, repo_run_dir)
+
     return repo_run_dir
+
+
+def build_hard_rule_outputs(stack: dict, run_id: str, run_dir: Path) -> dict[str, object]:
+    from hard_rule_pipeline import run_hard_rule_subscriptions
+
+    result_path = run_dir / "hard-rule-result.json"
+    try:
+        result = run_hard_rule_subscriptions(run_id, run_dir, result_path=result_path)
+    except Exception as exc:
+        payload = {
+            "state": "failed",
+            "reason": str(exc).strip() or exc.__class__.__name__,
+            "artifact_paths": [],
+            "updated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+        }
+        result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return {
+            "state": "failed",
+            "reason": payload["reason"],
+            "artifact_paths": [],
+        }
+    briefing_path = run_dir / "hard-rule-briefing.json"
+    if not briefing_path.exists():
+        return {
+            "state": result.state,
+            "reason": result.reason,
+            "artifact_paths": result.artifact_paths,
+        }
+
+    builder_paths: list[Path] = []
+    for relative in stack.get("output_skills", []):
+        if "hard-rules" not in str(relative):
+            continue
+        skill_path = ensure_skill_path(str(relative))
+        build_payload = resolve_output_builder(skill_path)
+        if build_payload is not None:
+            builder_paths.append(build_payload)
+
+    for builder_path in builder_paths:
+        if builder_path.exists():
+            try:
+                run_python(builder_path, str(briefing_path))
+            except Exception as exc:
+                payload = {
+                    "state": "failed",
+                    "reason": str(exc).strip() or exc.__class__.__name__,
+                    "artifact_paths": result.artifact_paths,
+                    "updated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+                }
+                result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                return {
+                    "state": "failed",
+                    "reason": payload["reason"],
+                    "artifact_paths": result.artifact_paths,
+                }
+
+    return {
+        "state": result.state,
+        "reason": result.reason,
+        "artifact_paths": result.artifact_paths,
+    }
 
 
 def write_result(result_path: Path, state: str, stage: str, run_id: str, run_dir: Path | None) -> None:

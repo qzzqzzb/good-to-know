@@ -30,6 +30,16 @@ from .configuration import (
     set_notion_page_url,
     state_tier,
 )
+from .hard_rule_config import (
+    SUPPORTED_HARD_RULE_SOURCES,
+    build_subscriptions_from_sources,
+    delete_subscription,
+    load_subscriptions,
+    parse_topic_overrides,
+    prompt_source_selection,
+    supported_sources_lines,
+    upsert_subscriptions,
+)
 from .launchd import launch_agent_loaded, load_launch_agent, unload_launch_agent, write_launch_agent
 from .locks import STALE_LOCK_SECONDS, lock_status, load_lock
 from .models import StateData
@@ -243,12 +253,56 @@ def prompt_multiline(prompt: str) -> str:
     return "\n".join(lines).strip()
 
 
+def prompt_yes_no(question: str, default: bool = False) -> bool:
+    suffix = " [Y/n] " if default else " [y/N] "
+    answer = input(question + suffix).strip().lower()
+    if not answer:
+        return default
+    return answer in {"y", "yes"}
+
+
+def configure_hard_rules(paths: GTNPaths, interactive: bool, args: argparse.Namespace) -> str:
+    selected_sources = list(getattr(args, "hard_rule_sources", []) or [])
+    overall_topic = str(getattr(args, "hard_rule_topic", "") or "").strip()
+    overrides = parse_topic_overrides(list(getattr(args, "hard_rule_topic_overrides", []) or []))
+
+    if interactive and not selected_sources:
+        if prompt_yes_no("Configure hard-rule recommendations now?", default=False):
+            Console().print("\nAvailable hard-rule sources:")
+            for line in supported_sources_lines():
+                Console().print(f"  {line}")
+            raw_selection = input(
+                "Select sources by number or source id (comma separated, blank to skip): "
+            ).strip()
+            if raw_selection:
+                selected_sources = prompt_source_selection(raw_selection)
+                overall_topic = input("Overall topic for selected sources: ").strip()
+                source_labels = {item.source_id: item.label for item in SUPPORTED_HARD_RULE_SOURCES}
+                for source in selected_sources:
+                    override = input(
+                        f"Topic override for {source_labels.get(source, source)} (blank to keep overall topic): "
+                    ).strip()
+                    if override:
+                        overrides[source] = override
+
+    if not selected_sources:
+        return "Not configured"
+
+    subscriptions = build_subscriptions_from_sources(selected_sources, overall_topic, overrides)
+    if not subscriptions:
+        return "Not configured"
+    persisted = upsert_subscriptions(paths, subscriptions)
+    return f"{len(subscriptions)} subscription(s) configured ({len(persisted)} total)"
+
+
 def run_onboarding(
+    paths: GTNPaths,
     runtime_repo: Path,
     tier: str,
     notion_page_url: str | None,
     feishu_webhook_url: str | None,
     user_profile: str | None,
+    args: argparse.Namespace,
     no_prompt: bool = False,
 ) -> dict[str, str]:
     interactive = sys.stdin.isatty() and not no_prompt
@@ -257,6 +311,7 @@ def run_onboarding(
         "notion": "Not configured",
         "feishu": "Not configured",
         "profile": "Not recorded",
+        "hard_rules": "Not configured",
     }
 
     apply_tier_to_runtime(runtime_repo, tier)
@@ -295,6 +350,7 @@ def run_onboarding(
             results["profile"] = f"Not recorded ({exc})"
         else:
             results["profile"] = "Recorded"
+    results["hard_rules"] = configure_hard_rules(paths, interactive, args)
     return results
 
 
@@ -333,6 +389,7 @@ def render_setup_summary(
     table.add_row("Notion", onboarding["notion"])
     table.add_row("Feishu", onboarding["feishu"])
     table.add_row("Profile", onboarding["profile"])
+    table.add_row("Hard rules", onboarding["hard_rules"])
     console.print(Panel(table, title="Setup Summary", border_style="green", box=box.ROUNDED))
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -361,11 +418,13 @@ def cmd_init(args: argparse.Namespace) -> int:
     state.launch_agent_path = str(paths.launch_agent_path)
     save_state(paths, state)
     onboarding = run_onboarding(
+        paths=paths,
         runtime_repo=runtime_repo,
         tier=state.tier,
         notion_page_url=getattr(args, "notion_page_url", None),
         feishu_webhook_url=getattr(args, "feishu_webhook_url", None),
         user_profile=getattr(args, "user_profile", None),
+        args=args,
         no_prompt=bool(getattr(args, "no_prompt", False)),
     )
     render_setup_summary(
@@ -471,6 +530,40 @@ def cmd_config_set(args: argparse.Namespace) -> int:
         print(f"feishu-webhook-url={summarize_feishu_webhook(args.value)}")
         return 0
     raise SystemExit(f"Unsupported config key '{args.key}'")
+
+
+def cmd_hard_rules_list(args: argparse.Namespace) -> int:
+    paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
+    subscriptions = load_subscriptions(paths)
+    if not subscriptions:
+        print("No hard-rule subscriptions configured")
+        return 0
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold cyan", justify="right")
+    table.add_column()
+    for item in subscriptions:
+        table.add_row(
+            str(item.get("id", "")),
+            f"{item.get('source', '')} | topic={item.get('topic', '')} | top_n={item.get('top_n', '')}",
+        )
+    Console().print(Panel(table, title="Hard-Rule Subscriptions", border_style="cyan", box=box.ROUNDED))
+    return 0
+
+
+def cmd_hard_rules_add(args: argparse.Namespace) -> int:
+    paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
+    subscriptions = upsert_subscriptions(paths, [build_subscriptions_from_sources([args.source], args.topic)[0]])
+    print(f"Added hard-rule subscription for {args.source} ({len(subscriptions)} total)")
+    return 0
+
+
+def cmd_hard_rules_delete(args: argparse.Namespace) -> int:
+    paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
+    removed = delete_subscription(paths, args.subscription_id)
+    if removed is None:
+        raise SystemExit(f"Hard-rule subscription not found: {args.subscription_id}")
+    print(f"Deleted hard-rule subscription {removed['id']}")
+    return 0
 
 def cmd_freq(args: argparse.Namespace) -> int:
     paths = resolve_paths(root=Path(args.root).expanduser() if args.root else None)
@@ -675,6 +768,22 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("--notion-page-url", help="Optional Notion page URL for first-time output setup")
         command_parser.add_argument("--feishu-webhook-url", help="Optional Feishu webhook URL for first-time output setup")
         command_parser.add_argument("--user-profile", help="Optional free-form user profile text to seed GTN memory")
+        command_parser.add_argument(
+            "--hard-rule-source",
+            dest="hard_rule_sources",
+            action="append",
+            help="Optional hard-rule source id to configure during setup (repeatable)",
+        )
+        command_parser.add_argument(
+            "--hard-rule-topic",
+            help="Optional overall hard-rule topic for setup-created subscriptions",
+        )
+        command_parser.add_argument(
+            "--hard-rule-topic-override",
+            dest="hard_rule_topic_overrides",
+            action="append",
+            help="Optional source=topic override for setup-created hard-rule subscriptions (repeatable)",
+        )
         command_parser.add_argument("--no-prompt", action="store_true", help="Skip interactive onboarding prompts")
         command_parser.set_defaults(func=cmd_init)
 
@@ -716,6 +825,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = subparsers.add_parser("status", help="Show scheduler and run status")
     status_parser.set_defaults(func=cmd_status)
+
+    hard_rules_parser = subparsers.add_parser("hard-rules", help="Manage hard-rule recommendation subscriptions")
+    hard_rules_subparsers = hard_rules_parser.add_subparsers(dest="hard_rules_command", required=True)
+
+    hard_rules_list_parser = hard_rules_subparsers.add_parser("list", help="List hard-rule subscriptions")
+    hard_rules_list_parser.set_defaults(func=cmd_hard_rules_list)
+
+    hard_rules_add_parser = hard_rules_subparsers.add_parser("add", help="Add a hard-rule subscription")
+    hard_rules_add_parser.add_argument("--source", required=True)
+    hard_rules_add_parser.add_argument("--topic", required=True)
+    hard_rules_add_parser.set_defaults(func=cmd_hard_rules_add)
+
+    hard_rules_delete_parser = hard_rules_subparsers.add_parser("delete", help="Delete a hard-rule subscription")
+    hard_rules_delete_parser.add_argument("subscription_id")
+    hard_rules_delete_parser.set_defaults(func=cmd_hard_rules_delete)
 
     return parser
 
