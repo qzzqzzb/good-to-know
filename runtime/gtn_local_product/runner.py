@@ -8,15 +8,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+from .cadence import parse_cadence, should_run_scheduled_now
 from .locks import ActiveRunError, StaleLockError, acquire_lock, release_lock
 from .models import LockInfo, ManifestData, ResultState, StateData
 from .paths import GTNPaths, ensure_directories
 from .prompting import render_prompt
 from .runtime_repo import read_run_output_dir
-from .status_data import build_run_summary, update_history_with_summary, write_run_summary
+from .status_data import build_run_summary, latest_run_snapshot, update_history_with_summary, write_run_summary
 from .storage import save_json
 
 SubprocessRunner = Callable[[list[str], Path, Path, Path, Path], subprocess.CompletedProcess[str]]
+MAX_TRANSIENT_RETRIES = 5
+TRANSIENT_FAILURE_MARKERS = (
+    "stream disconnected before completion",
+    "error sending request for url",
+    "connection reset",
+    "timed out",
+    "429",
+    "rate limit",
+    "too many requests",
+)
 
 
 class PreflightError(RuntimeError):
@@ -53,9 +64,11 @@ def default_subprocess_runner(
     with (
         stdout_path.open("w", encoding="utf-8") as out,
         stderr_path.open("w", encoding="utf-8") as err,
-        prompt_path.open("r", encoding="utf-8") as prompt_handle,
     ):
-        return subprocess.run(command, cwd=cwd, stdin=prompt_handle, stdout=out, stderr=err, text=True, check=False)
+        if command and command[-1] == "-":
+            with prompt_path.open("r", encoding="utf-8") as prompt_handle:
+                return subprocess.run(command, cwd=cwd, stdin=prompt_handle, stdout=out, stderr=err, text=True, check=False)
+        return subprocess.run(command, cwd=cwd, stdout=out, stderr=err, text=True, check=False)
 
 
 def build_codex_command(
@@ -65,9 +78,18 @@ def build_codex_command(
     last_message_path: Path,
     gtn_home: Path | None = None,
 ) -> list[str]:
+    temp_dir = app_run_dir / "tmp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
     command: list[str] = []
     if gtn_home is not None:
         command.extend(["env", f"GTN_HOME={gtn_home}"])
+    command.extend(
+        [
+            "TMPDIR=" + str(temp_dir),
+            "TMP=" + str(temp_dir),
+            "TEMP=" + str(temp_dir),
+        ]
+    )
     command.extend(
         [
         str(codex_path),
@@ -83,6 +105,40 @@ def build_codex_command(
         "-o",
         str(last_message_path),
         "-",
+        ]
+    )
+    return command
+
+
+def build_codex_resume_command(
+    codex_path: Path,
+    app_run_dir: Path,
+    last_message_path: Path,
+    gtn_home: Path | None = None,
+    prompt: str = "继续",
+) -> list[str]:
+    temp_dir = app_run_dir / "tmp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    command: list[str] = []
+    if gtn_home is not None:
+        command.extend(["env", f"GTN_HOME={gtn_home}"])
+    command.extend(
+        [
+            "TMPDIR=" + str(temp_dir),
+            "TMP=" + str(temp_dir),
+            "TEMP=" + str(temp_dir),
+        ]
+    )
+    command.extend(
+        [
+            str(codex_path),
+            "exec",
+            "resume",
+            "--last",
+            "--skip-git-repo-check",
+            "-o",
+            str(last_message_path),
+            prompt,
         ]
     )
     return command
@@ -149,6 +205,64 @@ def read_result_state(result_path: Path) -> tuple[ResultState | None, dict | Non
 
 def exit_code_for_state(state: ResultState) -> int:
     return EXIT_CODES[state]
+
+
+def _read_log_text(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def is_transient_codex_failure(
+    result: subprocess.CompletedProcess[str],
+    stdout_path: Path,
+    stderr_path: Path,
+    inner_payload: dict | None = None,
+) -> tuple[bool, str]:
+    haystack = "\n".join(
+        [
+            str((inner_payload or {}).get("message", "")),
+            _read_log_text(stdout_path),
+            _read_log_text(stderr_path),
+        ]
+    ).lower()
+    for marker in TRANSIENT_FAILURE_MARKERS:
+        if marker in haystack:
+            return True, marker
+    return False, ""
+
+
+def latest_completed_run_epoch(paths: GTNPaths) -> float | None:
+    latest_summary, _ = latest_run_snapshot(paths)
+    updated_at = str((latest_summary or {}).get("updated_at", "")).strip()
+    if not updated_at:
+        return None
+    try:
+        return datetime.fromisoformat(updated_at.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def maybe_skip_scheduled_run(paths: GTNPaths, state_data: StateData) -> dict[str, object] | None:
+    cadence = str(state_data.cadence or "").strip()
+    if not cadence:
+        return None
+    _, cadence_seconds = parse_cadence(cadence)
+    now_epoch = datetime.now(timezone.utc).astimezone().timestamp()
+    last_success_epoch = latest_completed_run_epoch(paths)
+    decision = should_run_scheduled_now(now_epoch, cadence_seconds, last_success_epoch)
+    if decision.should_run:
+        return None
+    return {
+        "message": f"Skipped scheduled run ({decision.reason})",
+        "details": {
+            "schedule": {
+                "reason": decision.reason,
+                "previous_slot_at": datetime.fromtimestamp(decision.previous_slot_epoch, tz=timezone.utc).astimezone().isoformat(timespec="seconds"),
+                "next_slot_at": datetime.fromtimestamp(decision.next_slot_epoch, tz=timezone.utc).astimezone().isoformat(timespec="seconds"),
+            }
+        },
+    }
 
 
 
@@ -230,44 +344,138 @@ def run_once(paths: GTNPaths, state_data: StateData, scheduled: bool = False, ru
 
         if exit_code == 0:
             try:
-                codex_path = resolve_codex_executable(state_data.codex_path)
-                ensure_codex_auth()
-                ensure_search_capability(codex_path)
-                ensure_notion_config(runtime_repo)
-                prompt_path.write_text(render_prompt(runtime_repo, repo_run_dir, app_run_dir, run_id), encoding="utf-8")
+                if scheduled:
+                    skipped = maybe_skip_scheduled_run(paths, state_data)
+                    if skipped is not None:
+                        final_state = ResultState.SUCCESS
+                        final_result_payload = {
+                            "state": final_state.value,
+                            "message": str(skipped["message"]),
+                            "updated_at": now_iso(),
+                            "details": dict(skipped["details"]),
+                        }
+                        write_result(result_path, final_state, str(skipped["message"]), dict(skipped["details"]))
+                        manifest.state = final_state.value
+                        manifest.finished_at = now_iso()
+                        manifest.details = dict(skipped["details"])
+                        write_manifest(manifest_path, manifest)
+                        exit_code = exit_code_for_state(final_state)
+                    else:
+                        codex_path = resolve_codex_executable(state_data.codex_path)
+                        ensure_codex_auth()
+                        ensure_search_capability(codex_path)
+                        ensure_notion_config(runtime_repo)
+                        prompt_path.write_text(render_prompt(runtime_repo, repo_run_dir, app_run_dir, run_id), encoding="utf-8")
 
-                command = build_codex_command(codex_path, runtime_repo, app_run_dir, last_message_path, gtn_home=paths.root)
-                process_runner = runner or default_subprocess_runner
-                result = process_runner(command, runtime_repo, stdout_path, stderr_path, prompt_path)
+                        process_runner = runner or default_subprocess_runner
+                        command = build_codex_command(codex_path, runtime_repo, app_run_dir, last_message_path, gtn_home=paths.root)
+                        details = {
+                            "repo_run_dir": str(repo_run_dir),
+                            "stdout_log": str(stdout_path),
+                            "stderr_log": str(stderr_path),
+                            "attempts": [],
+                        }
+                        inner_payload = None
+                        inner_state = None
+                        result = None
+                        for attempt in range(1, MAX_TRANSIENT_RETRIES + 2):
+                            result_path.unlink(missing_ok=True)
+                            result = process_runner(command, runtime_repo, stdout_path, stderr_path, prompt_path)
+                            inner_state, inner_payload = read_result_state(result_path)
+                            attempt_details = {
+                                "attempt": attempt,
+                                "command": "resume" if "resume" in command else "exec",
+                                "returncode": result.returncode,
+                            }
+                            should_retry, retry_reason = is_transient_codex_failure(result, stdout_path, stderr_path, inner_payload)
+                            if should_retry and attempt <= MAX_TRANSIENT_RETRIES:
+                                attempt_details["retry_reason"] = retry_reason
+                                details["attempts"].append(attempt_details)
+                                command = build_codex_resume_command(codex_path, app_run_dir, last_message_path, gtn_home=paths.root)
+                                continue
+                            details["attempts"].append(attempt_details)
+                            break
 
-                details = {
-                    "returncode": result.returncode,
-                    "repo_run_dir": str(repo_run_dir),
-                    "stdout_log": str(stdout_path),
-                    "stderr_log": str(stderr_path),
-                }
-                inner_state, inner_payload = read_result_state(result_path)
-                if inner_state is not None:
-                    state = inner_state
-                    message = str((inner_payload or {}).get("message", "Codex batch run finished"))
-                    details["inner_result"] = inner_payload
-                    final_result_payload = inner_payload
-                elif result.returncode == 0:
-                    state = ResultState.SUCCESS if repo_run_dir.exists() else ResultState.PARTIAL_SUCCESS
-                    message = "Codex batch run finished"
-                    write_result(result_path, state, message, details)
-                    final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+                        details["returncode"] = result.returncode if result is not None else 1
+                        if inner_state is not None:
+                            state = inner_state
+                            message = str((inner_payload or {}).get("message", "Codex batch run finished"))
+                            details["inner_result"] = inner_payload
+                            final_result_payload = inner_payload
+                        elif result is not None and result.returncode == 0:
+                            state = ResultState.SUCCESS if repo_run_dir.exists() else ResultState.PARTIAL_SUCCESS
+                            message = "Codex batch run finished"
+                            write_result(result_path, state, message, details)
+                            final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+                        else:
+                            state = ResultState.FAILED
+                            message = f"Codex batch run failed with return code {details['returncode']}"
+                            write_result(result_path, state, message, details)
+                            final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+                        final_state = state
+                        manifest.state = state.value
+                        manifest.finished_at = now_iso()
+                        manifest.details = details
+                        write_manifest(manifest_path, manifest)
+                        exit_code = exit_code_for_state(state)
                 else:
-                    state = ResultState.FAILED
-                    message = f"Codex batch run failed with return code {result.returncode}"
-                    write_result(result_path, state, message, details)
-                    final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
-                final_state = state
-                manifest.state = state.value
-                manifest.finished_at = now_iso()
-                manifest.details = details
-                write_manifest(manifest_path, manifest)
-                exit_code = exit_code_for_state(state)
+                    codex_path = resolve_codex_executable(state_data.codex_path)
+                    ensure_codex_auth()
+                    ensure_search_capability(codex_path)
+                    ensure_notion_config(runtime_repo)
+                    prompt_path.write_text(render_prompt(runtime_repo, repo_run_dir, app_run_dir, run_id), encoding="utf-8")
+
+                    process_runner = runner or default_subprocess_runner
+                    details = {
+                        "repo_run_dir": str(repo_run_dir),
+                        "stdout_log": str(stdout_path),
+                        "stderr_log": str(stderr_path),
+                        "attempts": [],
+                    }
+                    command = build_codex_command(codex_path, runtime_repo, app_run_dir, last_message_path, gtn_home=paths.root)
+                    inner_payload = None
+                    inner_state = None
+                    result = None
+                    for attempt in range(1, MAX_TRANSIENT_RETRIES + 2):
+                        result_path.unlink(missing_ok=True)
+                        result = process_runner(command, runtime_repo, stdout_path, stderr_path, prompt_path)
+                        inner_state, inner_payload = read_result_state(result_path)
+                        attempt_details = {
+                            "attempt": attempt,
+                            "command": "resume" if "resume" in command else "exec",
+                            "returncode": result.returncode,
+                        }
+                        should_retry, retry_reason = is_transient_codex_failure(result, stdout_path, stderr_path, inner_payload)
+                        if should_retry and attempt <= MAX_TRANSIENT_RETRIES:
+                            attempt_details["retry_reason"] = retry_reason
+                            details["attempts"].append(attempt_details)
+                            command = build_codex_resume_command(codex_path, app_run_dir, last_message_path, gtn_home=paths.root)
+                            continue
+                        details["attempts"].append(attempt_details)
+                        break
+
+                    details["returncode"] = result.returncode if result is not None else 1
+                    if inner_state is not None:
+                        state = inner_state
+                        message = str((inner_payload or {}).get("message", "Codex batch run finished"))
+                        details["inner_result"] = inner_payload
+                        final_result_payload = inner_payload
+                    elif result is not None and result.returncode == 0:
+                        state = ResultState.SUCCESS if repo_run_dir.exists() else ResultState.PARTIAL_SUCCESS
+                        message = "Codex batch run finished"
+                        write_result(result_path, state, message, details)
+                        final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+                    else:
+                        state = ResultState.FAILED
+                        message = f"Codex batch run failed with return code {details['returncode']}"
+                        write_result(result_path, state, message, details)
+                        final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+                    final_state = state
+                    manifest.state = state.value
+                    manifest.finished_at = now_iso()
+                    manifest.details = details
+                    write_manifest(manifest_path, manifest)
+                    exit_code = exit_code_for_state(state)
             except PreflightError as exc:
                 final_state = exc.state
                 final_result_payload = {

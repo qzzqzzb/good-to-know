@@ -16,6 +16,15 @@ def load_json(path: Path) -> dict:
 def save_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
+
+def resolve_runtime_notion_dir(results_path: Path) -> Path:
+    try:
+        runtime_root = results_path.resolve().parents[2]
+    except IndexError:
+        return SKILL_DIR
+    candidate = runtime_root / "output" / "notion-briefing"
+    return candidate if candidate.exists() else SKILL_DIR
+
 def apply_publish_results(results: dict, index: dict) -> dict:
     pages = index.setdefault("pages", {})
     checked_at = results.get("checked_at", "")
@@ -49,7 +58,7 @@ def main() -> None:
         raise SystemExit(f"Publish results not found: {results_path}")
 
     results = load_json(results_path)
-    index_path = Path(args.index_path).resolve() if args.index_path else INDEX_PATH
+    index_path = Path(args.index_path).resolve() if args.index_path else resolve_runtime_notion_dir(results_path) / "page_index.json"
     index = load_json(index_path) if index_path.exists() else {"pages": {}, "default_status": "No feedback"}
     save_json(index_path, apply_publish_results(results, index))
     print(f"[notion-briefing] applied publish results from {results_path}")

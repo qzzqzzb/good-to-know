@@ -19,6 +19,15 @@ def save_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def resolve_runtime_notion_dir(snapshot_path: Path) -> Path:
+    try:
+        runtime_root = snapshot_path.resolve().parents[2]
+    except IndexError:
+        return SKILL_DIR
+    candidate = runtime_root / "output" / "notion-briefing"
+    return candidate if candidate.exists() else SKILL_DIR
+
+
 def slugify(value: str) -> str:
     cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in value)
     parts = [part for part in cleaned.split("-") if part]
@@ -108,16 +117,19 @@ def main() -> None:
     if not snapshot_path.exists():
         raise SystemExit(f"Snapshot not found: {snapshot_path}")
 
+    notion_dir = resolve_runtime_notion_dir(snapshot_path)
+    index_path = notion_dir / "page_index.json"
+    outbox_path = notion_dir / "feedback_outbox.md"
     snapshot = load_json(snapshot_path)
-    index = load_json(INDEX_PATH) if INDEX_PATH.exists() else {"pages": {}, "default_status": "No feedback"}
+    index = load_json(index_path) if index_path.exists() else {"pages": {}, "default_status": "No feedback"}
     updated_index, new_records = sync_feedback(snapshot, index)
 
-    save_json(INDEX_PATH, updated_index)
+    save_json(index_path, updated_index)
     generated_at = snapshot.get("checked_at") or datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-    OUTBOX_PATH.write_text(render_outbox(new_records, generated_at), encoding="utf-8")
+    outbox_path.write_text(render_outbox(new_records, generated_at), encoding="utf-8")
 
     print(f"[notion-briefing] synced feedback state for {len(snapshot.get('pages', []))} page(s)")
-    print(f"[notion-briefing] wrote {len(new_records)} new feedback observation(s) to {OUTBOX_PATH}")
+    print(f"[notion-briefing] wrote {len(new_records)} new feedback observation(s) to {outbox_path}")
 
 
 if __name__ == "__main__":

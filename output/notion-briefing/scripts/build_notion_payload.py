@@ -2,15 +2,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 SETTINGS_PATH = SKILL_DIR / "settings.json"
+INDEX_PATH = SKILL_DIR / "page_index.json"
+NOTION_PAGE_ID_RE = re.compile(r"([0-9a-fA-F]{32})")
 
 
 def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_index() -> dict:
+    if not INDEX_PATH.exists():
+        return {"pages": {}}
+    return load_json(INDEX_PATH)
 
 
 def parse_score(item: dict) -> int:
@@ -28,6 +37,22 @@ def build_tags(item: dict) -> list[str]:
         if cleaned and cleaned not in tags:
             tags.append(cleaned)
     return tags
+
+
+def build_tags_text(item: dict) -> str:
+    return ", ".join(build_tags(item))
+
+
+def notion_parent_object(page_url: str) -> dict | None:
+    value = page_url.strip()
+    if not value:
+        return None
+    match = NOTION_PAGE_ID_RE.search(value.replace("-", ""))
+    if not match:
+        return None
+    raw = match.group(1).lower()
+    page_id = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
+    return {"type": "page_id", "page_id": page_id}
 
 
 def render_page_body(item: dict) -> str:
@@ -70,7 +95,7 @@ def build_page_payload(item: dict, settings: dict) -> dict:
             visible["url"]: url,
             visible["score"]: parse_score(item),
             visible["summary"]: item.get("summary", ""),
-            visible["tags"]: build_tags(item),
+            visible["tags"]: build_tags_text(item),
             visible["status"]: settings.get("default_status", "No feedback"),
             hidden["dedup_key"]: item.get("dedup_key", ""),
         },
@@ -80,17 +105,35 @@ def build_page_payload(item: dict, settings: dict) -> dict:
 
 def build_payload(briefing: dict, settings: dict) -> dict:
     items = briefing.get("items", [])
-    pages = [build_page_payload(item, settings) for item in items]
+    index = load_index()
+    indexed_pages = index.get("pages", {}) if isinstance(index, dict) else {}
+    pages = []
+    skipped_existing: list[str] = []
+    for item in items:
+        dedup_key = str(item.get("dedup_key", "")).strip()
+        existing = indexed_pages.get(dedup_key, {}) if isinstance(indexed_pages, dict) else {}
+        if str(existing.get("page_id", "")).strip():
+            skipped_existing.append(dedup_key)
+            continue
+        pages.append(build_page_payload(item, settings))
 
+    parent_page_url = settings.get("parent_page_url", "")
     return {
         "run_id": briefing.get("run_id", ""),
         "generated_at": briefing.get("generated_at", ""),
         "database": {
             "name": settings.get("database_name", "GoodToKnow Recommendations"),
             "database_url": settings.get("database_url", ""),
-            "parent_page_url": settings.get("parent_page_url", ""),
+            "parent_page_url": parent_page_url,
+            "parent": notion_parent_object(str(parent_page_url)),
             "visible_properties": settings.get("visible_properties", {}),
             "hidden_properties": settings.get("hidden_properties", {}),
+        },
+        "publish_hints": {
+            "tags_property_encoding": "comma_separated_string",
+            "dedup_match_property": settings.get("hidden_properties", {}).get("dedup_key", "Dedup Key"),
+            "existing_row_policy": "skip_update_for_indexed_rows",
+            "skipped_existing_dedup_keys": skipped_existing,
         },
         "pages": pages,
     }

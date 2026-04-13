@@ -261,6 +261,84 @@ def prompt_yes_no(question: str, default: bool = False) -> bool:
     return answer in {"y", "yes"}
 
 
+def summarize_current_value(value: str, limit: int = 72) -> str:
+    clean = " ".join(value.split())
+    if not clean:
+        return "(not set)"
+    if len(clean) <= limit:
+        return clean
+    return f"{clean[: limit - 3].rstrip()}..."
+
+
+def current_profile_text(runtime_repo: Path) -> str:
+    identity_path = runtime_repo / "memory" / "mempalace-memory" / "identity.md"
+    if not identity_path.exists():
+        return ""
+    text = identity_path.read_text(encoding="utf-8").strip()
+    if not text or "No user profile has been recorded yet." in text:
+        return ""
+    return text
+
+
+def render_setup_prompt_block(
+    console: Console,
+    title: str,
+    current_value: str,
+    *,
+    note: str | None = None,
+) -> None:
+    current_text = summarize_current_value(current_value)
+    lines = [f"Current value: {current_text}"]
+    if current_value.strip():
+        lines[-1] += " (enter to keep and skip)"
+    if note:
+        lines.extend(["", note])
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title=f"🚀 {title}",
+            border_style="bright_cyan",
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+    )
+    console.print()
+
+
+def prompt_value_with_current(
+    console: Console,
+    title: str,
+    current_value: str,
+    *,
+    note: str | None = None,
+) -> str:
+    render_setup_prompt_block(console, title, current_value, note=note)
+    entered = input("New value: ").strip()
+    if not entered and current_value.strip():
+        return current_value.strip()
+    return entered
+
+
+def prompt_multiline_with_current(
+    console: Console,
+    title: str,
+    current_value: str,
+    *,
+    note: str | None = None,
+) -> str | None:
+    render_setup_prompt_block(console, title, current_value, note=note)
+    console.print("New value:")
+    lines: list[str] = []
+    while True:
+        line = input().rstrip("\n")
+        if not line:
+            break
+        lines.append(line)
+    if not lines and current_value.strip():
+        return None
+    return "\n".join(lines).strip()
+
+
 def configure_hard_rules(paths: GTNPaths, interactive: bool, args: argparse.Namespace) -> str:
     selected_sources = list(getattr(args, "hard_rule_sources", []) or [])
     overall_topic = str(getattr(args, "hard_rule_topic", "") or "").strip()
@@ -305,6 +383,7 @@ def run_onboarding(
     args: argparse.Namespace,
     no_prompt: bool = False,
 ) -> dict[str, str]:
+    console = Console()
     interactive = sys.stdin.isatty() and not no_prompt
     results = {
         "tier": tier,
@@ -316,34 +395,50 @@ def run_onboarding(
 
     apply_tier_to_runtime(runtime_repo, tier)
 
+    current_notion_page_url = str(
+        load_json(runtime_repo / "output" / "notion-briefing" / "settings.json", {}).get("parent_page_url", "")
+    ).strip()
     effective_notion_page_url = (notion_page_url or "").strip()
     if not effective_notion_page_url and interactive:
-        effective_notion_page_url = input(
-            "Optional Notion page URL for GTN output (leave blank to skip): "
-        ).strip()
+        effective_notion_page_url = prompt_value_with_current(
+            console,
+            "Notion URL setup",
+            current_notion_page_url,
+        )
     if effective_notion_page_url:
         set_notion_page_url(runtime_repo, effective_notion_page_url)
         results["notion"] = effective_notion_page_url
 
+    current_feishu_webhook_url = str(
+        load_json(runtime_repo / "output" / "feishu-briefing" / "settings.json", {}).get("webhook_url", "")
+    ).strip()
     effective_feishu_webhook_url = (feishu_webhook_url or "").strip()
     if not effective_feishu_webhook_url and interactive:
-        effective_feishu_webhook_url = input(
-            "Optional Feishu webhook URL for GTN output (leave blank to skip): "
-        ).strip()
+        effective_feishu_webhook_url = prompt_value_with_current(
+            console,
+            "Feishu webhook setup",
+            current_feishu_webhook_url,
+        )
     if effective_feishu_webhook_url:
         set_feishu_webhook_url(runtime_repo, effective_feishu_webhook_url)
         results["feishu"] = summarize_feishu_webhook(effective_feishu_webhook_url)
 
+    current_profile = current_profile_text(runtime_repo)
     effective_user_profile = (user_profile or "").strip()
     if not effective_user_profile and interactive:
-        effective_user_profile = prompt_multiline(
-            "\nOptional profile setup\n"
-            "----------------------\n"
-            "Describe yourself in a few lines so GoodToKnow can make better recommendations.\n"
-            "Include your interests, the work you do on this computer, and recurring topics you care about.\n"
-            "Finish by entering an empty line."
+        effective_user_profile = prompt_multiline_with_current(
+            console,
+            "Profile setup",
+            current_profile,
+            note=(
+                "Describe yourself in a few lines so GoodToKnow can make better recommendations.\n"
+                "Include your interests, the work you do on this computer, and recurring topics you care about.\n"
+                "Finish by entering an empty line."
+            ),
         )
-    if effective_user_profile:
+    if effective_user_profile is None:
+        results["profile"] = "Recorded"
+    elif effective_user_profile:
         try:
             record_initial_user_profile(runtime_repo, effective_user_profile)
         except (subprocess.CalledProcessError, RuntimeError) as exc:

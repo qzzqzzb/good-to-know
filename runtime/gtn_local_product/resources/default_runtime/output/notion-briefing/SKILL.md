@@ -62,10 +62,14 @@ Use it for idempotent upsert behavior, but do not treat it as user-facing UI.
 4. Read the generated `notion-payload.json`.
 5. If `database_url` is configured, use Notion MCP to fetch that database and upsert each item by `Dedup Key`.
 6. If `database_url` is empty but `parent_page_url` is configured, create the database first using the schema in `references/notion-schema.md`.
+   - Use `database.parent` from `notion-payload.json` as the MCP-ready parent object when it is present.
+   - Do not pass the raw `parent_page_url` string as the database parent if `database.parent` is available.
 7. For each item:
    - write visible properties to the database row
    - store `digest` in the page body
-   - use `Dedup Key` to detect existing rows and update instead of duplicating
+   - in unattended GTN runs, prefer `publish_hints.existing_row_policy`
+   - if a `Dedup Key` is already indexed locally and omitted from the payload, skip updating that existing row instead of forcing an MCP update
+   - treat `Tags` as a scalar comma-separated string from the payload, not a raw JSON array
    - write `runs/<run_id>/publish-results.json` and apply it with `scripts/apply_publish_results.py`
 8. Preserve user feedback:
    - if a page already has a non-default `Feedback`, do not overwrite it during publish
@@ -84,3 +88,5 @@ These steps are for Codex to execute as part of the active runtime loop. The nor
 - If Notion MCP is unavailable in the current session, this skill should still build `notion-payload.json` as the publish handoff artifact and report the missing MCP server as the blocker.
 - `Feedback` is a user feedback channel; publishing should not blindly reset non-default values.
 - The intended loop is: fetch Notion feedback first, ingest it into memory, then generate and publish the next wave of recommendations.
+- The payload intentionally emits `Tags` as a scalar string and includes `database.parent` to reduce MCP-side ambiguity during unattended runs.
+- The payload may also omit already indexed rows so unattended GTN runs can focus on creating new recommendations without risking fragile MCP update paths on existing pages.

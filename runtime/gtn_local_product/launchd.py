@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
+from .cadence import start_calendar_intervals
 from .paths import DEFAULT_LAUNCH_AGENT_LABEL, GTNPaths
 
 DEFAULT_MINIMAL_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -28,8 +29,8 @@ def render_launch_agent_plist(paths: GTNPaths, python_executable: Path, cadence_
             "run",
             "--scheduled",
         ],
-        "StartInterval": cadence_seconds,
-        "RunAtLoad": False,
+        "StartCalendarInterval": start_calendar_intervals(cadence_seconds),
+        "RunAtLoad": True,
         "WorkingDirectory": str(paths.runtime_dir),
         "EnvironmentVariables": {
             "HOME": str(Path.home()),

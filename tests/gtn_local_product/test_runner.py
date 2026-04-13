@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from runtime.gtn_local_product.models import StateData
 from runtime.gtn_local_product.paths import resolve_paths
-from runtime.gtn_local_product.runner import build_codex_command, run_once
+from runtime.gtn_local_product.runner import build_codex_command, build_codex_resume_command, run_once
 
 
 class RunnerTests(unittest.TestCase):
@@ -20,6 +20,7 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("--add-dir", cmd)
         self.assertIn("/tmp/app-run", cmd)
         self.assertIn("--skip-git-repo-check", cmd)
+        self.assertIn("TMPDIR=/tmp/app-run/tmp", cmd)
 
     def test_build_codex_command_can_propagate_gtn_home(self) -> None:
         cmd = build_codex_command(
@@ -30,6 +31,19 @@ class RunnerTests(unittest.TestCase):
             gtn_home=Path("/tmp/gtn-home"),
         )
         self.assertEqual(cmd[:2], ["env", "GTN_HOME=/tmp/gtn-home"])
+
+    def test_build_codex_resume_command_targets_last_session(self) -> None:
+        cmd = build_codex_resume_command(
+            Path("/usr/local/bin/codex"),
+            Path("/tmp/app-run"),
+            Path("/tmp/app-run/last-message.txt"),
+            gtn_home=Path("/tmp/gtn-home"),
+        )
+        self.assertEqual(cmd[:2], ["env", "GTN_HOME=/tmp/gtn-home"])
+        self.assertIn("TMPDIR=/tmp/app-run/tmp", cmd)
+        self.assertIn("resume", cmd)
+        self.assertIn("--last", cmd)
+        self.assertEqual(cmd[-1], "继续")
 
     def test_run_once_records_failed_result_on_unexpected_runner_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -175,6 +189,55 @@ class RunnerTests(unittest.TestCase):
                     run_once(paths, state, runner=fake_runner)
 
             self.assertFalse(paths.lock_file.exists(), "lock should be released even when summary aggregation fails")
+
+    def test_run_once_retries_transient_codex_failure_with_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            (runtime_repo / "bootstrap").mkdir(parents=True)
+            (runtime_repo / "bootstrap" / "stack.yaml").write_text("run_output_dir: runs\n", encoding="utf-8")
+            (runtime_repo / "output" / "notion-briefing").mkdir(parents=True)
+            (runtime_repo / "output" / "notion-briefing" / "settings.json").write_text("{}", encoding="utf-8")
+
+            paths = resolve_paths(root=root, runtime_dir=runtime_repo)
+            state = StateData(runtime_repo_path=str(runtime_repo), codex_path="/bin/echo")
+            seen_commands: list[list[str]] = []
+
+            def flaky_runner(command, cwd, stdout_path, stderr_path, prompt_path):
+                seen_commands.append(list(command))
+                app_run_dir = Path(command[command.index("--add-dir") + 1]) if "--add-dir" in command else prompt_path.parent
+                repo_run_dir = runtime_repo / "runs" / app_run_dir.name
+                repo_run_dir.mkdir(parents=True, exist_ok=True)
+                if "resume" not in command:
+                    stderr_path.write_text("ERROR: stream disconnected before completion\n", encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 1)
+                stdout_path.write_text("", encoding="utf-8")
+                stderr_path.write_text("", encoding="utf-8")
+                (repo_run_dir / "memory-findings.json").write_text("[]", encoding="utf-8")
+                (repo_run_dir / "briefing.json").write_text(json.dumps({"items": []}), encoding="utf-8")
+                (app_run_dir / "result.json").write_text(
+                    json.dumps(
+                        {
+                            "state": "success",
+                            "message": "ok",
+                            "updated_at": "2026-04-10T00:00:00+00:00",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 0)
+
+            with (
+                patch("runtime.gtn_local_product.runner.ensure_codex_auth"),
+                patch("runtime.gtn_local_product.runner.ensure_search_capability"),
+                patch("runtime.gtn_local_product.runner.ensure_notion_config"),
+                patch("runtime.gtn_local_product.runner.resolve_codex_executable", return_value=Path("/bin/echo")),
+            ):
+                rc = run_once(paths, state, runner=flaky_runner)
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(seen_commands), 2)
+            self.assertIn("resume", seen_commands[1])
 
 
 if __name__ == "__main__":

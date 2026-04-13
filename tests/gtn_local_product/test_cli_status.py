@@ -221,6 +221,7 @@ class StatusTests(unittest.TestCase):
             self.assertRegex(output, r"Version\s+0\.2\.1")
             self.assertIn("0.2.2 (update", output)
             self.assertIn("available)", output)
+            self.assertRegex(output, r"Anchor\s+08:00")
 
     def test_status_shows_no_run_yet_when_no_run_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -250,6 +251,7 @@ class StatusTests(unittest.TestCase):
             output = buf.getvalue()
             self.assertEqual(rc, 0)
             self.assertIn("No run yet", output)
+            self.assertRegex(output, r"Anchor\s+08:00")
 
     def test_status_marks_repo_version_source_when_package_metadata_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -546,6 +548,61 @@ class StatusTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             output = buf.getvalue()
             self.assertIn("Not recorded", output)
+
+    def test_setup_interactive_enter_keeps_existing_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            root = tmp_path / ".gtn"
+            runtime_repo = tmp_path / "runtime" / "GoodToKnow"
+            self._seed_runtime_tree(runtime_repo)
+            (runtime_repo / "output" / "notion-briefing" / "settings.json").write_text(
+                json.dumps({"parent_page_url": "https://notion.local/current"}),
+                encoding="utf-8",
+            )
+            (runtime_repo / "output" / "feishu-briefing" / "settings.json").write_text(
+                json.dumps({"webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/current-hook"}),
+                encoding="utf-8",
+            )
+            identity_path = runtime_repo / "memory" / "mempalace-memory" / "identity.md"
+            identity_path.parent.mkdir(parents=True, exist_ok=True)
+            identity_path.write_text("I care about agent systems.\n", encoding="utf-8")
+
+            with (
+                patch.object(cli, "resolve_codex_executable", return_value=Path("/bin/echo")),
+                patch.object(cli.sys.stdin, "isatty", return_value=True),
+                patch.object(cli, "record_initial_user_profile") as record_profile,
+                patch("builtins.input", side_effect=["", "", "", "n"]),
+            ):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = cli.main(
+                        [
+                            "--root",
+                            str(root),
+                            "setup",
+                            "--runtime-repo",
+                            str(runtime_repo),
+                            "--codex-path",
+                            "/bin/echo",
+                        ]
+                    )
+
+            self.assertEqual(rc, 0)
+            output = buf.getvalue()
+            notion_settings = json.loads(
+                (runtime_repo / "output" / "notion-briefing" / "settings.json").read_text(encoding="utf-8")
+            )
+            feishu_settings = json.loads(
+                (runtime_repo / "output" / "feishu-briefing" / "settings.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(notion_settings["parent_page_url"], "https://notion.local/current")
+            self.assertEqual(feishu_settings["webhook_url"], "https://open.feishu.cn/open-apis/bot/v2/hook/current-hook")
+            record_profile.assert_not_called()
+            self.assertIn("🚀 Notion URL setup", output)
+            self.assertIn("Current value: https://notion.local/current", output)
+            self.assertIn("enter to keep and skip", output)
+            self.assertIn("🚀 Feishu webhook setup", output)
+            self.assertIn("🚀 Profile setup", output)
 
     def test_config_get_and_set_support_tier_and_urls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

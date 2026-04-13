@@ -17,7 +17,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .cadence import next_run_epoch, parse_cadence
+from .cadence import DEFAULT_ANCHOR_HOUR, next_run_epoch, parse_cadence
 from .launchd import launch_agent_loaded
 from .locks import load_lock, lock_status
 from .models import StateData
@@ -151,6 +151,10 @@ def display_destination(raw_value: str, reveal: int = 14, sensitive: bool = Fals
     if len(value) <= reveal * 2:
         return value
     return f'{value[:reveal]}...{value[-reveal:]}'
+
+
+def anchor_display() -> str:
+    return f"{DEFAULT_ANCHOR_HOUR:02d}:00"
 
 
 def repo_declared_version() -> str | None:
@@ -307,6 +311,7 @@ def build_status_snapshot(paths: GTNPaths, state: StateData) -> dict:
     return {
         'enabled': state.enabled and launch_agent_loaded(),
         'cadence': state.cadence or '(unset)',
+        'anchor': anchor_display(),
         'runtime_repo': str(runtime_repo) if runtime_repo else '(unset)',
         'lock_state': lock_status(paths.lock_file),
         'lock_run_id': lock.get('run_id', '') if lock else '',
@@ -382,6 +387,7 @@ def build_status_dashboard(snapshot: dict):
     system.add_row('Version', current_version)
     system.add_row('Latest', str(snapshot.get('latest_version', '(unknown)')))
     system.add_row('Cadence', str(snapshot.get('cadence', '(unset)')))
+    system.add_row('Anchor', str(snapshot.get('anchor', '(unknown)')))
     system.add_row(
         'Next run',
         compact_text(

@@ -14,6 +14,12 @@ App-state run dir: `{app_run_dir}`
 
 Follow the active runtime selected by `bootstrap/stack.yaml` and treat the runtime and output skills as the source of truth.
 
+Important isolation rules for unattended product runs:
+- Ignore any `.omx/` directory contents in this runtime repo. They are not part of the GTN runtime contract.
+- Do not use `omx_*` MCP tools, Ralph/Ralplan workflows, or session-restoration logic in this unattended run.
+- Do not inspect or rely on parent-directory `AGENTS.md` files outside the provided runtime repo.
+- Stay inside the stack/runtime/output contracts available on disk under this repo.
+
 Important runtime seam:
 - Preserve the provided run identity by keeping all repo artifacts under `{repo_run_dir}`.
 - When invoking deterministic local helpers, pass the exact run identity with:

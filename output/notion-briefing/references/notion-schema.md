@@ -10,7 +10,7 @@ The table should stay light enough to scan quickly.
 - `URL` — URL property
 - `Score` — number property (1-10)
 - `Summary` — rich text property
-- `Tags` — multi-select property
+- `Tags` — rich text property storing a comma-separated tag string
 - `Feedback` — feedback select property with:
   - `No feedback`
   - `Good to know`
