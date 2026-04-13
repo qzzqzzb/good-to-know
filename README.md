@@ -23,6 +23,15 @@ It runs locally, reads signals from your current work, uses Codex with web searc
 
 Think of it as a quiet research scout for your real work.
 
+## News
+
+### 2026-04-13
+
+- GTN now supports a high-level recommendation `language` config with `en` and `zh`.
+- Use `gtn config get language` and `gtn config set language zh|en` to switch the language of recommendation content.
+- This update changes recommendation content only (`title`, `summary`, `why_recommended`, `digest`); operational surfaces such as `gtn status`, Feishu/Notion labels, and Notion schema remain unchanged.
+- Chinese output is fluency-first: necessary English product names and terms may still appear when that reads more naturally.
+
 ## Installation
 
 ### Recommended: install from PyPI

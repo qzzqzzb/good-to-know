@@ -23,6 +23,15 @@
 
 你可以把它当作一个安静的“侦察兵”，始终紧贴你的实际工作，默默帮你留意周遭的价值资讯。
 
+## News
+
+### 2026-04-13
+
+- GTN 现在支持高层配置项 `language`，当前只支持 `en` 和 `zh`。
+- 可以通过 `gtn config get language` 和 `gtn config set language zh|en` 切换推荐内容的语言。
+- 这次更新只影响推荐内容本身（`title`、`summary`、`why_recommended`、`digest`），不会改变 `gtn status` 这类操作面，也不会改 Feishu / Notion 的英文 label 或 Notion schema。
+- 中文输出以通顺为第一目标；如果产品名或术语保留英文更自然，就允许中英混用。
+
 ## 安装方式
 
 ### 推荐：通过 PyPI 安装
