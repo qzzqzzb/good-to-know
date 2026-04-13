@@ -156,6 +156,23 @@ class BuildNotionPayloadTests(unittest.TestCase):
         self.assertIn("## Tags", body)
         self.assertIn("agents, memory", body)
 
+    def test_render_page_body_keeps_english_headings_when_content_is_chinese(self) -> None:
+        item = {
+            "score": 8,
+            "summary": "这是一段中文 summary。",
+            "why_recommended": "因为你最近在看 agent 和 product system 相关内容。",
+            "digest": "更长一点的中文 digest。",
+            "tags": ["agent", "product"],
+        }
+
+        body = module.render_page_body(item)
+
+        self.assertIn("## Why This Recommendation", body)
+        self.assertIn("## Digest", body)
+        self.assertIn("## Tags", body)
+        self.assertIn("因为你最近在看 agent 和 product system 相关内容。", body)
+        self.assertIn("更长一点的中文 digest。", body)
+
 
 if __name__ == "__main__":
     unittest.main()

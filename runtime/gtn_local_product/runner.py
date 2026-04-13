@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from .cadence import parse_cadence, should_run_scheduled_now
+from .configuration import state_language
 from .locks import ActiveRunError, StaleLockError, acquire_lock, release_lock
 from .models import LockInfo, ManifestData, ResultState, StateData
 from .paths import GTNPaths, ensure_directories
@@ -365,7 +366,16 @@ def run_once(paths: GTNPaths, state_data: StateData, scheduled: bool = False, ru
                         ensure_codex_auth()
                         ensure_search_capability(codex_path)
                         ensure_notion_config(runtime_repo)
-                        prompt_path.write_text(render_prompt(runtime_repo, repo_run_dir, app_run_dir, run_id), encoding="utf-8")
+                        prompt_path.write_text(
+                            render_prompt(
+                                runtime_repo,
+                                repo_run_dir,
+                                app_run_dir,
+                                run_id,
+                                language=state_language(state_data),
+                            ),
+                            encoding="utf-8",
+                        )
 
                         process_runner = runner or default_subprocess_runner
                         command = build_codex_command(codex_path, runtime_repo, app_run_dir, last_message_path, gtn_home=paths.root)
@@ -423,7 +433,16 @@ def run_once(paths: GTNPaths, state_data: StateData, scheduled: bool = False, ru
                     ensure_codex_auth()
                     ensure_search_capability(codex_path)
                     ensure_notion_config(runtime_repo)
-                    prompt_path.write_text(render_prompt(runtime_repo, repo_run_dir, app_run_dir, run_id), encoding="utf-8")
+                    prompt_path.write_text(
+                        render_prompt(
+                            runtime_repo,
+                            repo_run_dir,
+                            app_run_dir,
+                            run_id,
+                            language=state_language(state_data),
+                        ),
+                        encoding="utf-8",
+                    )
 
                     process_runner = runner or default_subprocess_runner
                     details = {

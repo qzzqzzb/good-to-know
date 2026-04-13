@@ -97,6 +97,36 @@ class BuildFeishuPayloadTests(unittest.TestCase):
         self.assertLess(payload["source"]["rendered_item_count"], 21)
         self.assertTrue(payload["message"]["content"]["text"].endswith("\n"))
 
+    def test_build_payload_keeps_english_labels_when_content_is_chinese(self) -> None:
+        settings = {
+            "webhook_url": "",
+            "message_title": "GoodToKnow Briefing",
+            "required_keyword": "",
+            "max_items": 1,
+        }
+        briefing = {
+            "run_id": "run-zh",
+            "generated_at": "2026-04-13T09:00:00+08:00",
+            "items": [
+                {
+                    "title": "示例推荐",
+                    "score": 8,
+                    "summary": "这是一段中文 summary。",
+                    "why_recommended": "因为你最近在看 agent 和 product system 相关内容。",
+                    "digest": "更长一点的中文 digest。",
+                    "raw": "https://example.com/zh",
+                }
+            ],
+            "warnings": {"missing_score_entry_ids": []},
+        }
+
+        payload = module.build_payload(briefing, settings)
+        text = payload["message"]["content"]["text"]
+
+        self.assertIn("Summary: 这是一段中文 summary。", text)
+        self.assertIn("Why now: 因为你最近在看 agent 和 product system 相关内容。", text)
+        self.assertIn("Digest: 更长一点的中文 digest。", text)
+
 
 if __name__ == "__main__":
     unittest.main()

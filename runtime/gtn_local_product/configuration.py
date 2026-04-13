@@ -7,6 +7,8 @@ from typing import Any
 from .models import StateData
 
 DEFAULT_TIER = "balanced"
+DEFAULT_LANGUAGE = "en"
+SUPPORTED_LANGUAGES = ("en", "zh")
 TIER_PRESETS: dict[str, dict[str, int]] = {
     "light": {
         "agent_sessions.lookback_hours": 72,
@@ -34,7 +36,7 @@ TIER_PRESETS: dict[str, dict[str, int]] = {
     },
 }
 
-CONFIG_KEYS = ("tier", "notion-page-url", "feishu-webhook-url")
+CONFIG_KEYS = ("tier", "language", "notion-page-url", "feishu-webhook-url")
 
 
 def load_json(path: Path, default: dict[str, Any]) -> dict[str, Any]:
@@ -58,6 +60,18 @@ def normalize_tier(value: str | None) -> str:
 
 def state_tier(state: StateData) -> str:
     return normalize_tier(getattr(state, "tier", DEFAULT_TIER))
+
+
+def normalize_language(value: str | None) -> str:
+    language = (value or "").strip().lower() or DEFAULT_LANGUAGE
+    if language not in SUPPORTED_LANGUAGES:
+        allowed = ", ".join(SUPPORTED_LANGUAGES)
+        raise SystemExit(f"Unsupported language '{value}'. Allowed values: {allowed}")
+    return language
+
+
+def state_language(state: StateData) -> str:
+    return normalize_language(getattr(state, "language", DEFAULT_LANGUAGE))
 
 
 def context_settings_path(runtime_repo: Path) -> Path:
@@ -109,6 +123,8 @@ def set_feishu_webhook_url(runtime_repo: Path, webhook_url: str) -> None:
 def get_config_value(runtime_repo: Path, state: StateData, key: str) -> str:
     if key == "tier":
         return state_tier(state)
+    if key == "language":
+        return state_language(state)
     if key == "notion-page-url":
         settings = load_json(notion_settings_path(runtime_repo), {})
         return str(settings.get("parent_page_url", "")).strip()

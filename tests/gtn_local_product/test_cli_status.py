@@ -604,7 +604,7 @@ class StatusTests(unittest.TestCase):
             self.assertIn("🚀 Feishu webhook setup", output)
             self.assertIn("🚀 Profile setup", output)
 
-    def test_config_get_and_set_support_tier_and_urls(self) -> None:
+    def test_config_get_and_set_support_tier_language_and_urls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             runtime_repo = root / "runtime" / "GoodToKnow"
@@ -615,6 +615,7 @@ class StatusTests(unittest.TestCase):
                         "runtime_repo_path": str(runtime_repo),
                         "codex_path": "/usr/local/bin/codex",
                         "tier": "balanced",
+                        "language": "en",
                         "launch_agent_path": str(root / "com.goodtoknow.gtn.plist"),
                     }
                 ),
@@ -637,6 +638,15 @@ class StatusTests(unittest.TestCase):
             self.assertEqual(state["tier"], "light")
             self.assertEqual(context_settings["features"]["browser_history"]["lookback_hours"], 24)
             self.assertEqual(feishu_settings["max_items"], 10)
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli.main(["--root", str(root), "config", "set", "language", "zh"])
+            self.assertEqual(rc, 0)
+            self.assertIn("language=zh", buf.getvalue())
+
+            state = json.loads((root / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["language"], "zh")
 
             buf = io.StringIO()
             with redirect_stdout(buf):
@@ -665,6 +675,33 @@ class StatusTests(unittest.TestCase):
                 rc = cli.main(["--root", str(root), "config", "get", "tier"])
             self.assertEqual(rc, 0)
             self.assertEqual(buf.getvalue().strip(), "light")
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli.main(["--root", str(root), "config", "get", "language"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(buf.getvalue().strip(), "zh")
+
+    def test_config_set_language_rejects_unsupported_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            self._seed_runtime_tree(runtime_repo)
+            (root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "runtime_repo_path": str(runtime_repo),
+                        "codex_path": "/usr/local/bin/codex",
+                        "launch_agent_path": str(root / "com.goodtoknow.gtn.plist"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(SystemExit) as exc:
+                cli.main(["--root", str(root), "config", "set", "language", "fr"])
+
+            self.assertIn("Unsupported language", str(exc.exception))
 
     def test_packaged_runtime_copies_mutable_files_but_links_immutable_assets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

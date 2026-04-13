@@ -3,8 +3,22 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def render_prompt(runtime_repo: Path, repo_run_dir: Path, app_run_dir: Path, run_id: str) -> str:
+def render_prompt(runtime_repo: Path, repo_run_dir: Path, app_run_dir: Path, run_id: str, language: str = "en") -> str:
     result_path = app_run_dir / "result.json"
+    normalized_language = (language or "en").strip().lower() or "en"
+    if normalized_language == "zh":
+        language_instruction = (
+            "Recommendation content language: `zh`\n"
+            "- Write recommendation content fields (`title`, `summary`, `why_recommended`, `digest`) in Chinese-first natural prose.\n"
+            "- Keep necessary English product names, proper nouns, and terms when that reads more naturally.\n"
+            "- Do not localize operational text, status text, or downstream output labels/schema."
+        )
+    else:
+        language_instruction = (
+            "Recommendation content language: `en`\n"
+            "- Write recommendation content fields (`title`, `summary`, `why_recommended`, `digest`) in English.\n"
+            "- Do not localize operational text, status text, or downstream output labels/schema."
+        )
     return f"""You are running GoodToKnow unattended as a local scheduled product run.
 
 Working repo: `{runtime_repo}`
@@ -25,6 +39,9 @@ Important runtime seam:
 - When invoking deterministic local helpers, pass the exact run identity with:
   `python3 runtime/codex-agent-loop/scripts/run_active_stack.py --stage <stage> --run-id "{run_id}" --run-dir "{repo_run_dir}"`
 - Do not let helper scripts invent a different run id for this scheduled product run.
+
+Recommendation-writing contract:
+{language_instruction}
 
 Required outcomes:
 1. Run the deterministic pre-discovery phase first.

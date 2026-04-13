@@ -17,6 +17,25 @@ class PromptingTests(unittest.TestCase):
         self.assertIn("feishu-payload.json", prompt)
         self.assertIn("notion-payload.json", prompt)
 
+    def test_render_prompt_defaults_to_english_recommendation_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            prompt = render_prompt(root, root / "repo-run", root / "app-run", "run-123")
+
+        self.assertIn("Recommendation content language: `en`", prompt)
+        self.assertIn("write recommendation content fields (`title`, `summary`, `why_recommended`, `digest`) in English".lower(), prompt.lower())
+        self.assertIn("Do not localize operational text, status text, or downstream output labels/schema.", prompt)
+
+    def test_render_prompt_supports_chinese_recommendation_content_without_localizing_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            prompt = render_prompt(root, root / "repo-run", root / "app-run", "run-123", language="zh")
+
+        self.assertIn("Recommendation content language: `zh`", prompt)
+        self.assertIn("Chinese-first natural prose", prompt)
+        self.assertIn("Keep necessary English product names, proper nouns, and terms", prompt)
+        self.assertIn("Do not localize operational text, status text, or downstream output labels/schema.", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

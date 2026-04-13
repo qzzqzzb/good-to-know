@@ -25,6 +25,7 @@ from .configuration import (
     TIER_PRESETS,
     apply_tier_to_runtime,
     get_config_value,
+    normalize_language,
     normalize_tier,
     set_feishu_webhook_url,
     set_notion_page_url,
@@ -615,6 +616,11 @@ def cmd_config_set(args: argparse.Namespace) -> int:
         apply_tier_to_runtime(runtime_repo, state.tier)
         save_state(paths, state)
         print(f"tier={state.tier}")
+        return 0
+    if args.key == "language":
+        state.language = normalize_language(args.value)
+        save_state(paths, state)
+        print(f"language={state.language}")
         return 0
     if args.key == "notion-page-url":
         set_notion_page_url(runtime_repo, args.value)

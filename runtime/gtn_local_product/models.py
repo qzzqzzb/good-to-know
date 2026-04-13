@@ -33,6 +33,7 @@ class StateData:
     codex_path: str = ""
     cadence: str = ""
     tier: str = "balanced"
+    language: str = "en"
     enabled: bool = False
     launch_agent_label: str = "com.goodtoknow.gtn"
     launch_agent_path: str = ""
