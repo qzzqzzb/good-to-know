@@ -70,6 +70,7 @@ Use it for idempotent upsert behavior, but do not treat it as user-facing UI.
    - in unattended GTN runs, prefer `publish_hints.existing_row_policy`
    - if a `Dedup Key` is already indexed locally and omitted from the payload, skip updating that existing row instead of forcing an MCP update
    - treat `Tags` as a scalar comma-separated string from the payload, not a raw JSON array
+   - always keep tags visible in the page body even if the database property path is unavailable or skipped
    - write `runs/<run_id>/publish-results.json` and apply it with `scripts/apply_publish_results.py`
 8. Preserve user feedback:
    - if a page already has a non-default `Feedback`, do not overwrite it during publish
@@ -90,3 +91,4 @@ These steps are for Codex to execute as part of the active runtime loop. The nor
 - The intended loop is: fetch Notion feedback first, ingest it into memory, then generate and publish the next wave of recommendations.
 - The payload intentionally emits `Tags` as a scalar string and includes `database.parent` to reduce MCP-side ambiguity during unattended runs.
 - The payload may also omit already indexed rows so unattended GTN runs can focus on creating new recommendations without risking fragile MCP update paths on existing pages.
+- Long text fields in the page body should be normalized to single-paragraph prose instead of preserving arbitrary wrapped line breaks from intermediate markdown sources.

@@ -43,6 +43,10 @@ def build_tags_text(item: dict) -> str:
     return ", ".join(build_tags(item))
 
 
+def compact_text(value: object) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
 def notion_parent_object(page_url: str) -> dict | None:
     value = page_url.strip()
     if not value:
@@ -57,10 +61,11 @@ def notion_parent_object(page_url: str) -> dict | None:
 
 def render_page_body(item: dict) -> str:
     score = parse_score(item)
-    why_recommended = str(item.get("why_recommended", "")).strip()
-    digest = str(item.get("digest", "")).strip()
+    why_recommended = compact_text(item.get("why_recommended", ""))
+    digest = compact_text(item.get("digest", ""))
     if not digest:
-        digest = str(item.get("summary", "")).strip()
+        digest = compact_text(item.get("summary", ""))
+    tags_text = build_tags_text(item)
     lines = [
         "## Why This Recommendation",
         "",
@@ -72,6 +77,15 @@ def render_page_body(item: dict) -> str:
         "",
         digest or "(missing digest)",
     ]
+    if tags_text:
+        lines.extend(
+            [
+                "",
+                "## Tags",
+                "",
+                tags_text,
+            ]
+        )
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -134,6 +148,7 @@ def build_payload(briefing: dict, settings: dict) -> dict:
             "dedup_match_property": settings.get("hidden_properties", {}).get("dedup_key", "Dedup Key"),
             "existing_row_policy": "skip_update_for_indexed_rows",
             "skipped_existing_dedup_keys": skipped_existing,
+            "tags_page_body_fallback": True,
         },
         "pages": pages,
     }

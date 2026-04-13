@@ -142,6 +142,20 @@ class BuildNotionPayloadTests(unittest.TestCase):
         self.assertEqual(payload["publish_hints"]["existing_row_policy"], "skip_update_for_indexed_rows")
         self.assertEqual(payload["publish_hints"]["skipped_existing_dedup_keys"], ["abc"])
 
+    def test_render_page_body_normalizes_wrapped_text_and_includes_tags(self) -> None:
+        item = {
+            "score": 8,
+            "summary": "Summary text",
+            "why_recommended": "This line wraps\n\nin odd ways\nfor no reason.",
+            "digest": "Digest also\nhas broken\nline wrapping.",
+            "tags": ["agents", "memory"],
+        }
+        body = module.render_page_body(item)
+        self.assertIn("This line wraps in odd ways for no reason.", body)
+        self.assertIn("Digest also has broken line wrapping.", body)
+        self.assertIn("## Tags", body)
+        self.assertIn("agents, memory", body)
+
 
 if __name__ == "__main__":
     unittest.main()
