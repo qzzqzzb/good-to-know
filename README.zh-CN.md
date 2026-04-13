@@ -27,10 +27,7 @@
 
 ### 2026-04-13
 
-- GTN 现在支持高层配置项 `language`，当前只支持 `en` 和 `zh`。
-- 可以通过 `gtn config get language` 和 `gtn config set language zh|en` 切换推荐内容的语言。
-- 这次更新只影响推荐内容本身（`title`、`summary`、`why_recommended`、`digest`），不会改变 `gtn status` 这类操作面，也不会改 Feishu / Notion 的英文 label 或 Notion schema。
-- 中文输出以通顺为第一目标；如果产品名或术语保留英文更自然，就允许中英混用。
+- GTN 现在支持中英文推荐内容切换。具体用法见下方 `配置` → `推荐语言`。
 
 ## 安装方式
 
@@ -286,6 +283,18 @@ GTN 如何把 agent 历史转成上下文：
 后面这些边界当然可能演进，但当前默认实现其实很克制：主要就是“最近浏览器历史 + 最近 coding-agent 工作历史”。
 
 ## 配置
+
+### 推荐语言
+
+可以通过 GTN 的 config 命令切换推荐内容语言：
+
+```bash
+gtn config get language
+gtn config set language zh
+gtn config set language en
+```
+
+这个设置只影响推荐内容本身。
 
 ### Notion 输出
 

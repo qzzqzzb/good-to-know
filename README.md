@@ -27,10 +27,7 @@ Think of it as a quiet research scout for your real work.
 
 ### 2026-04-13
 
-- GTN now supports a high-level recommendation `language` config with `en` and `zh`.
-- Use `gtn config get language` and `gtn config set language zh|en` to switch the language of recommendation content.
-- This update changes recommendation content only (`title`, `summary`, `why_recommended`, `digest`); operational surfaces such as `gtn status`, Feishu/Notion labels, and Notion schema remain unchanged.
-- Chinese output is fluency-first: necessary English product names and terms may still appear when that reads more naturally.
+- GTN now supports switching recommendation content between English and Chinese. See `Configuration` → `Recommendation Language` below.
 
 ## Installation
 
@@ -287,6 +284,18 @@ In the current default stack, GTN is **not** trying to broadly sweep your machin
 That may evolve later, but the current default implementation is much narrower: recent browser history plus recent coding-agent work history.
 
 ## Configuration
+
+### Recommendation Language
+
+Use the GTN config command to switch recommendation content between English and Chinese:
+
+```bash
+gtn config get language
+gtn config set language zh
+gtn config set language en
+```
+
+This setting changes recommendation content only.
 
 ### Notion Output
 
