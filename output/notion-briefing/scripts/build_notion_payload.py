@@ -95,6 +95,7 @@ def build_page_payload(item: dict, settings: dict) -> dict:
     url = str(item.get("raw", "")).strip()
 
     return {
+        "recommendation_index": item.get("recommendation_index", ""),
         "dedup_key": item.get("dedup_key", ""),
         "match": {
             "property": hidden["dedup_key"],

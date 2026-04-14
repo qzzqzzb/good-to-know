@@ -47,8 +47,9 @@ def build_item_lines(item: dict, index: int) -> list[str]:
     digest = compact_text(item.get("digest") or item.get("summary", ""), 220)
     url = str(item.get("raw", "")).strip()
     score = parse_score(item)
+    recommendation_index = int(item.get("recommendation_index", index) or index)
 
-    lines = [f"{index}. {title} ({score}/10)"]
+    lines = [f"{recommendation_index}. {title} ({score}/10)"]
     if summary:
         lines.append(f"   Summary: {summary}")
     if why:

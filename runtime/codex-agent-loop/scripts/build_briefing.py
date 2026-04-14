@@ -164,6 +164,8 @@ def build_briefing_payload(findings: list[dict], run_id: str, wakeup_text: str =
         items.append(item)
 
     items.sort(key=lambda item: (int(item.get("score", 5)), sort_time_key(item.get("time", ""))), reverse=True)
+    for recommendation_index, item in enumerate(items, start=1):
+        item["recommendation_index"] = recommendation_index
 
     return {
         "run_id": run_id,
@@ -201,6 +203,7 @@ def render_markdown(payload: dict) -> str:
         lines.extend(
             [
                 f"## {item['title']}",
+                f"- recommendation_index: {item.get('recommendation_index', '')}",
                 f"- entry_id: {item['entry_id']}",
                 f"- dedup_key: {item['dedup_key']}",
                 f"- time: {item['time']}",

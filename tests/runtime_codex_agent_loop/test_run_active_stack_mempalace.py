@@ -78,6 +78,7 @@ class RunActiveStackMempalaceTests(unittest.TestCase):
             self.assertEqual(briefing_payload["run_id"], "run-123")
             self.assertEqual(briefing_payload["memory_wakeup"], wakeup_text)
             self.assertEqual(briefing_payload["items"][0]["title"], "Runtime finding")
+            self.assertEqual(briefing_payload["items"][0]["recommendation_index"], 1)
 
     def test_build_outputs_generates_payloads_for_multiple_output_skills(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

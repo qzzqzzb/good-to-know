@@ -72,6 +72,33 @@ class BuildFeishuPayloadTests(unittest.TestCase):
         self.assertIn("2. Second item (7/10)", text)
         self.assertNotIn("3. Third item", text)
 
+    def test_build_payload_uses_recommendation_index_when_present(self) -> None:
+        settings = {
+            "webhook_url": "",
+            "message_title": "Daily Digest",
+            "required_keyword": "",
+            "max_items": 1,
+        }
+        briefing = {
+            "run_id": "run-123",
+            "generated_at": "2026-04-09T16:00:00+08:00",
+            "items": [
+                {
+                    "recommendation_index": 4,
+                    "title": "Fourth-ranked item",
+                    "score": 9,
+                    "summary": "A short summary.",
+                    "why_recommended": "It matters now.",
+                    "digest": "A longer digest.",
+                    "raw": "https://example.com/1",
+                }
+            ],
+            "warnings": {"missing_score_entry_ids": []},
+        }
+
+        payload = module.build_payload(briefing, settings)
+        self.assertIn("4. Fourth-ranked item (9/10)", payload["message"]["content"]["text"])
+
     def test_render_message_text_truncates_to_safe_length(self) -> None:
         briefing = {
             "run_id": "run-123",

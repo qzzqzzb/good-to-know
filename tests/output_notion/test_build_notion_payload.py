@@ -45,8 +45,36 @@ class BuildNotionPayloadTests(unittest.TestCase):
             "tags": ["agents", "memory"],
         }
         page = module.build_page_payload(item, settings)
+        self.assertEqual(page["recommendation_index"], "")
         self.assertEqual(page["properties"]["Score"], 8)
         self.assertEqual(page["properties"]["Tags"], "agents, memory")
+
+    def test_build_page_payload_preserves_recommendation_index(self) -> None:
+        settings = {
+            "visible_properties": {
+                "title": "Title",
+                "url": "URL",
+                "score": "Score",
+                "summary": "Summary",
+                "tags": "Tags",
+                "status": "Status",
+            },
+            "hidden_properties": {"dedup_key": "Dedup Key"},
+            "default_status": "No feedback",
+        }
+        item = {
+            "recommendation_index": 3,
+            "dedup_key": "abc",
+            "title": "Example",
+            "raw": "https://example.com",
+            "score": 8,
+            "summary": "Summary",
+            "why_recommended": "Why",
+            "digest": "Digest",
+            "tags": ["agents", "memory"],
+        }
+        page = module.build_page_payload(item, settings)
+        self.assertEqual(page["recommendation_index"], 3)
 
     def test_build_payload_includes_parent_object_and_publish_hints(self) -> None:
         settings = {
