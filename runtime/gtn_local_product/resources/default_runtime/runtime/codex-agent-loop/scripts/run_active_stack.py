@@ -171,8 +171,6 @@ def build_outputs(stack: dict, run_id: str | None = None, run_dir: Path | None =
         if build_payload is not None:
             run_python(build_payload, str(briefing_path))
 
-    build_hard_rule_outputs(stack, repo_run_id, repo_run_dir)
-
     return repo_run_dir
 
 

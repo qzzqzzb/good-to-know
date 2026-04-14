@@ -36,6 +36,16 @@ class PromptingTests(unittest.TestCase):
         self.assertIn("Keep necessary English product names, proper nouns, and terms", prompt)
         self.assertIn("Do not localize operational text, status text, or downstream output labels/schema.", prompt)
 
+    def test_render_prompt_describes_codex_native_hard_rule_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            prompt = render_prompt(root, root / "repo-run", root / "app-run", "run-123")
+
+        self.assertIn("prepare_hard_rule_worklist.py", prompt)
+        self.assertIn("hard-rule-items.json", prompt)
+        self.assertIn("run_hard_rules.py --run-id", prompt)
+        self.assertIn("runtime/codex-agent-loop/references/hard-rule-web-research.md", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

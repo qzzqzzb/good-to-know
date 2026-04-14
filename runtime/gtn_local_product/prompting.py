@@ -47,9 +47,19 @@ Required outcomes:
 1. Run the deterministic pre-discovery phase first.
 2. Follow the active discovery skills from `bootstrap/stack.yaml` and use Codex web search when required by those skills.
 3. If the active output skill supports feedback collection, fetch feedback first, then sync/ingest it using that skill's own protocol.
-4. Run the deterministic post-discovery phase so `briefing.json`, `briefing.md`, and the active output payload artifacts (for example `notion-payload.json` and `feishu-payload.json`) end up under `{repo_run_dir}`.
-5. If the active output skill publishes to an external destination, preserve user feedback fields and write any skill-owned publish-result artifact that the output skill expects.
-6. If you can determine a machine-readable completion state, write a compact structured result file at `{result_path}`; otherwise leave that file for the outer product runner.
+4. Run the deterministic post-discovery phase so `briefing.json`, `briefing.md`, and the main-track output payload artifacts (for example `notion-payload.json` and `feishu-payload.json`) end up under `{repo_run_dir}`.
+5. If `GTN_HOME/hard-rules/subscriptions.json` contains subscriptions, prepare the hard-rule worklist with:
+   `python3 runtime/codex-agent-loop/scripts/prepare_hard_rule_worklist.py --run-dir "{repo_run_dir}"`
+6. If the hard-rule worklist contains eligible subscriptions, use Codex native web search/browsing to research each subscription and write a normalized JSON list to `{repo_run_dir}/hard-rule-items.json`.
+   - Read `runtime/codex-agent-loop/references/hard-rule-web-research.md` before researching this track.
+   - For `producthunt`, follow the live-web inspection posture in that reference: browse current Product Hunt pages, prefer canonical Product Hunt URLs, and do not guess from memory.
+   - For `arxiv`, use native web search/browsing to find current arXiv papers relevant to the topic, and prefer canonical arXiv abstract URLs plus published timestamps visible on arXiv.
+   - Each hard-rule item should include: `subscription_id`, `source`, `topic`, `title`, `summary`, `link`, `published_at`, `dedup_key`, `raw`.
+7. Finalize hard-rule artifacts and refresh-state with:
+   `python3 runtime/codex-agent-loop/scripts/run_hard_rules.py --run-id "{run_id}" --run-dir "{repo_run_dir}" --items-json "{repo_run_dir}/hard-rule-items.json" --worklist-json "{repo_run_dir}/hard-rule-worklist.json" --result-path "{repo_run_dir}/hard-rule-result.json"`
+8. For each active hard-rule output skill, build the corresponding payload from `hard-rule-briefing.json` and publish/prepare it using that skill's own protocol.
+9. If the active output skill publishes to an external destination, preserve user feedback fields and write any skill-owned publish-result artifact that the output skill expects.
+10. If you can determine a machine-readable completion state, write a compact structured result file at `{result_path}`; otherwise leave that file for the outer product runner.
 
 Do not ask the user follow-up questions. Operate within the existing skill contracts and repo boundaries.
 """

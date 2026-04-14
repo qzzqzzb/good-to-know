@@ -49,7 +49,15 @@ Use these helper commands inside Codex when it speeds up the loop:
 - `python3 runtime/codex-agent-loop/scripts/run_active_stack.py --stage post-discovery`
 
 The first refreshes context and ingests it into memory.
-The second ingests discovery outboxes, ingests any prepared feedback outboxes, builds `briefing.json` / `briefing.md`, and builds active output payloads such as `notion-payload.json` or `feishu-payload.json`.
+The second ingests discovery outboxes, ingests any prepared feedback outboxes, builds `briefing.json` / `briefing.md`, and builds the main-track output payloads such as `notion-payload.json` or `feishu-payload.json`.
+
+Hard-rule recommendations are now a Codex-native web-research track:
+
+- `python3 runtime/codex-agent-loop/scripts/prepare_hard_rule_worklist.py --run-dir <run-dir>`
+- Codex web-research writes `<run-dir>/hard-rule-items.json`
+- `python3 runtime/codex-agent-loop/scripts/run_hard_rules.py --run-id <run-id> --run-dir <run-dir> --items-json <run-dir>/hard-rule-items.json --worklist-json <run-dir>/hard-rule-worklist.json`
+
+Use `runtime/codex-agent-loop/references/hard-rule-web-research.md` as the local reference for this track.
 
 If discovery outboxes are already ready, Codex may use:
 
