@@ -59,7 +59,11 @@ Required outcomes:
    `python3 runtime/codex-agent-loop/scripts/run_hard_rules.py --run-id "{run_id}" --run-dir "{repo_run_dir}" --items-json "{repo_run_dir}/hard-rule-items.json" --worklist-json "{repo_run_dir}/hard-rule-worklist.json" --result-path "{repo_run_dir}/hard-rule-result.json"`
 8. For each active hard-rule output skill, build the corresponding payload from `hard-rule-briefing.json` and publish/prepare it using that skill's own protocol.
 9. If the active output skill publishes to an external destination, preserve user feedback fields and write any skill-owned publish-result artifact that the output skill expects.
-10. If you can determine a machine-readable completion state, write a compact structured result file at `{result_path}`; otherwise leave that file for the outer product runner.
+10. If Feishu or another non-primary push destination fails, do not keep investigating indefinitely once the local artifacts and Notion-facing outputs are already complete. Record the destination failure in its publish-result artifact and stop with a compact partial-success result.
+11. Write a compact structured result file at `{result_path}` before stopping:
+   - `success` when the main local artifacts and required configured destinations succeed
+   - `partial_success` when the main local artifacts are complete but an auxiliary destination such as Feishu fails
+   Include a short message and any useful destination-specific details you already know.
 
 Do not ask the user follow-up questions. Operate within the existing skill contracts and repo boundaries.
 """

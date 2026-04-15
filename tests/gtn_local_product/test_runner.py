@@ -9,10 +9,32 @@ from unittest.mock import patch
 
 from runtime.gtn_local_product.models import StateData
 from runtime.gtn_local_product.paths import resolve_paths
-from runtime.gtn_local_product.runner import build_codex_command, build_codex_resume_command, run_once
+from runtime.gtn_local_product.runner import (
+    build_codex_command,
+    build_codex_resume_command,
+    run_once,
+    should_finalize_partial_success_from_repo_artifacts,
+)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_partial_success_ready_when_briefing_and_notion_exist_but_feishu_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_run_dir = Path(tmp)
+            (repo_run_dir / "briefing.json").write_text("{}", encoding="utf-8")
+            (repo_run_dir / "briefing.md").write_text("# Briefing\n", encoding="utf-8")
+            (repo_run_dir / "publish-results.json").write_text("{}", encoding="utf-8")
+            (repo_run_dir / "feishu-publish-result.json").write_text(
+                json.dumps({"state": "failed", "message": "dns boom"}),
+                encoding="utf-8",
+            )
+
+            ready, details = should_finalize_partial_success_from_repo_artifacts(repo_run_dir)
+
+            self.assertTrue(ready)
+            self.assertEqual(details["destination_failures"][0]["destination"], "feishu")
+            self.assertIn("dns boom", details["destination_failures"][0]["message"])
+
     def test_build_codex_command_uses_workspace_write_and_app_run_dir(self) -> None:
         cmd = build_codex_command(Path("/usr/local/bin/codex"), Path("/tmp/runtime"), Path("/tmp/app-run"), Path("/tmp/app-run/last-message.txt"))
         self.assertIn("--sandbox", cmd)
@@ -238,6 +260,47 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertEqual(len(seen_commands), 2)
             self.assertIn("resume", seen_commands[1])
+
+    def test_run_once_finishes_partial_success_when_feishu_fails_after_main_outputs_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_repo = root / "runtime" / "GoodToKnow"
+            (runtime_repo / "bootstrap").mkdir(parents=True)
+            (runtime_repo / "bootstrap" / "stack.yaml").write_text("run_output_dir: runs\n", encoding="utf-8")
+            (runtime_repo / "output" / "notion-briefing").mkdir(parents=True)
+            (runtime_repo / "output" / "notion-briefing" / "settings.json").write_text("{}", encoding="utf-8")
+
+            paths = resolve_paths(root=root, runtime_dir=runtime_repo)
+            state = StateData(runtime_repo_path=str(runtime_repo), codex_path="/bin/echo")
+
+            def hanging_runner(command, cwd, stdout_path, stderr_path, prompt_path):
+                app_run_dir = Path(command[command.index("--add-dir") + 1])
+                repo_run_dir = runtime_repo / "runs" / app_run_dir.name
+                repo_run_dir.mkdir(parents=True, exist_ok=True)
+                (repo_run_dir / "briefing.json").write_text(json.dumps({"items": []}), encoding="utf-8")
+                (repo_run_dir / "briefing.md").write_text("# Briefing\n", encoding="utf-8")
+                (repo_run_dir / "publish-results.json").write_text(json.dumps({"pages": []}), encoding="utf-8")
+                (repo_run_dir / "feishu-publish-result.json").write_text(
+                    json.dumps({"state": "failed", "message": "dns boom"}),
+                    encoding="utf-8",
+                )
+                stderr_path.write_text("still running but feishu failed\n", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 1)
+
+            with (
+                patch("runtime.gtn_local_product.runner.ensure_codex_auth"),
+                patch("runtime.gtn_local_product.runner.ensure_search_capability"),
+                patch("runtime.gtn_local_product.runner.ensure_notion_config"),
+                patch("runtime.gtn_local_product.runner.resolve_codex_executable", return_value=Path("/bin/echo")),
+            ):
+                rc = run_once(paths, state, scheduled=True, runner=hanging_runner)
+
+            self.assertEqual(rc, 10)
+            result_files = sorted(paths.runs_dir.glob("*/result.json"))
+            self.assertTrue(result_files)
+            payload = json.loads(result_files[-1].read_text(encoding="utf-8"))
+            self.assertEqual(payload["state"], "partial_success")
+            self.assertIn("destination_failures", payload["details"])
 
 
 if __name__ == "__main__":

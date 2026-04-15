@@ -46,6 +46,15 @@ class PromptingTests(unittest.TestCase):
         self.assertIn("run_hard_rules.py --run-id", prompt)
         self.assertIn("runtime/codex-agent-loop/references/hard-rule-web-research.md", prompt)
 
+    def test_render_prompt_requires_partial_success_on_auxiliary_publish_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            prompt = render_prompt(root, root / "repo-run", root / "app-run", "run-123")
+
+        self.assertIn("do not keep investigating indefinitely", prompt)
+        self.assertIn("partial-success result", prompt)
+        self.assertIn("`partial_success` when the main local artifacts are complete but an auxiliary destination such as Feishu fails", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

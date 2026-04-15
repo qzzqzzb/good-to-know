@@ -214,6 +214,44 @@ def _read_log_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def should_finalize_partial_success_from_repo_artifacts(repo_run_dir: Path) -> tuple[bool, dict[str, object]]:
+    if not repo_run_dir.exists():
+        return False, {}
+    briefing_ready = (repo_run_dir / "briefing.json").exists() and (repo_run_dir / "briefing.md").exists()
+    notion_ready = (repo_run_dir / "publish-results.json").exists() or not (repo_run_dir / "notion-payload.json").exists()
+    if not (briefing_ready and notion_ready):
+        return False, {}
+
+    details: dict[str, object] = {}
+    feishu_result_path = repo_run_dir / "feishu-publish-result.json"
+    hard_rule_feishu_result_path = repo_run_dir / "hard-rule-feishu-publish-result.json"
+    failed_destinations: list[dict[str, str]] = []
+    for label, path in (
+        ("feishu", feishu_result_path),
+        ("hard-rule-feishu", hard_rule_feishu_result_path),
+    ):
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        state = str(payload.get("state", "")).strip().lower()
+        if state == "failed":
+            failed_destinations.append(
+                {
+                    "destination": label,
+                    "message": str(payload.get("message", "")).strip() or "publish failed",
+                }
+            )
+    if not failed_destinations:
+        return False, {}
+
+    details["destination_failures"] = failed_destinations
+    details["repo_run_dir"] = str(repo_run_dir)
+    return True, details
+
+
 def is_transient_codex_failure(
     result: subprocess.CompletedProcess[str],
     stdout_path: Path,
@@ -231,6 +269,28 @@ def is_transient_codex_failure(
         if marker in haystack:
             return True, marker
     return False, ""
+
+
+def finalize_partial_success_if_ready(
+    result_path: Path,
+    manifest_path: Path,
+    manifest: ManifestData,
+    repo_run_dir: Path,
+    details: dict[str, object] | None = None,
+) -> dict:
+    final_details = dict(details or {})
+    ready, artifact_details = should_finalize_partial_success_from_repo_artifacts(repo_run_dir)
+    if not ready:
+        raise RuntimeError("partial success fallback requested before repo artifacts were ready")
+    final_details.update(artifact_details)
+    message = "GTN run completed with destination publish failures"
+    write_result(result_path, ResultState.PARTIAL_SUCCESS, message, final_details)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    manifest.state = ResultState.PARTIAL_SUCCESS.value
+    manifest.finished_at = now_iso()
+    manifest.details = final_details
+    write_manifest(manifest_path, manifest)
+    return payload
 
 
 def latest_completed_run_epoch(paths: GTNPaths) -> float | None:
@@ -403,31 +463,49 @@ def run_once(paths: GTNPaths, state_data: StateData, scheduled: bool = False, ru
                                 details["attempts"].append(attempt_details)
                                 command = build_codex_resume_command(codex_path, app_run_dir, last_message_path, gtn_home=paths.root)
                                 continue
+                            partial_ready, partial_details = should_finalize_partial_success_from_repo_artifacts(repo_run_dir)
+                            if partial_ready:
+                                attempt_details["partial_success_fallback"] = True
+                                details["attempts"].append(attempt_details)
+                                details["returncode"] = result.returncode
+                                final_result_payload = finalize_partial_success_if_ready(
+                                    result_path,
+                                    manifest_path,
+                                    manifest,
+                                    repo_run_dir,
+                                    details=details,
+                                )
+                                final_state = ResultState.PARTIAL_SUCCESS
+                                exit_code = exit_code_for_state(final_state)
+                                break
                             details["attempts"].append(attempt_details)
                             break
 
-                        details["returncode"] = result.returncode if result is not None else 1
-                        if inner_state is not None:
-                            state = inner_state
-                            message = str((inner_payload or {}).get("message", "Codex batch run finished"))
-                            details["inner_result"] = inner_payload
-                            final_result_payload = inner_payload
-                        elif result is not None and result.returncode == 0:
-                            state = ResultState.SUCCESS if repo_run_dir.exists() else ResultState.PARTIAL_SUCCESS
-                            message = "Codex batch run finished"
-                            write_result(result_path, state, message, details)
-                            final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+                        if final_state == ResultState.PARTIAL_SUCCESS:
+                            pass
                         else:
-                            state = ResultState.FAILED
-                            message = f"Codex batch run failed with return code {details['returncode']}"
-                            write_result(result_path, state, message, details)
-                            final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
-                        final_state = state
-                        manifest.state = state.value
-                        manifest.finished_at = now_iso()
-                        manifest.details = details
-                        write_manifest(manifest_path, manifest)
-                        exit_code = exit_code_for_state(state)
+                            details["returncode"] = result.returncode if result is not None else 1
+                            if inner_state is not None:
+                                state = inner_state
+                                message = str((inner_payload or {}).get("message", "Codex batch run finished"))
+                                details["inner_result"] = inner_payload
+                                final_result_payload = inner_payload
+                            elif result is not None and result.returncode == 0:
+                                state = ResultState.SUCCESS if repo_run_dir.exists() else ResultState.PARTIAL_SUCCESS
+                                message = "Codex batch run finished"
+                                write_result(result_path, state, message, details)
+                                final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+                            else:
+                                state = ResultState.FAILED
+                                message = f"Codex batch run failed with return code {details['returncode']}"
+                                write_result(result_path, state, message, details)
+                                final_result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+                            final_state = state
+                            manifest.state = state.value
+                            manifest.finished_at = now_iso()
+                            manifest.details = details
+                            write_manifest(manifest_path, manifest)
+                            exit_code = exit_code_for_state(state)
                 else:
                     codex_path = resolve_codex_executable(state_data.codex_path)
                     ensure_codex_auth()
