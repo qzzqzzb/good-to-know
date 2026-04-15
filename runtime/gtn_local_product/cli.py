@@ -262,6 +262,15 @@ def prompt_yes_no(question: str, default: bool = False) -> bool:
     return answer in {"y", "yes"}
 
 
+def schedule_python_executable() -> Path:
+    argv0 = Path(sys.argv[0]).expanduser()
+    if argv0.exists():
+        sibling_python = argv0.absolute().parent / "python"
+        if sibling_python.exists():
+            return sibling_python
+    return Path(sys.executable)
+
+
 def summarize_current_value(value: str, limit: int = 72) -> str:
     clean = " ".join(value.split())
     if not clean:
@@ -677,7 +686,7 @@ def cmd_freq(args: argparse.Namespace) -> int:
     state.codex_path = str(codex_path)
     state.cadence = cadence
     state.enabled = True
-    plist_path = write_launch_agent(paths, Path(sys.executable), cadence_seconds)
+    plist_path = write_launch_agent(paths, schedule_python_executable(), cadence_seconds)
     unload_launch_agent(plist_path)
     load_launch_agent(plist_path)
     save_state(paths, state)

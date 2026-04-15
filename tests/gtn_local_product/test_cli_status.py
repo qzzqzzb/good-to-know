@@ -17,6 +17,18 @@ from runtime.gtn_local_product.runner import exit_code_for_state
 
 
 class StatusTests(unittest.TestCase):
+    def test_schedule_python_executable_prefers_sibling_python_next_to_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir(parents=True, exist_ok=True)
+            gtn_path = bin_dir / "gtn"
+            python_path = bin_dir / "python"
+            gtn_path.write_text("#!/bin/sh\n", encoding="utf-8")
+            python_path.write_text("#!/bin/sh\n", encoding="utf-8")
+
+            with patch.object(cli.sys, "argv", [str(gtn_path)]):
+                self.assertEqual(cli.schedule_python_executable(), python_path)
+
     @staticmethod
     def _git(*args: str, cwd: Path | None = None) -> None:
         subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True)

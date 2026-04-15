@@ -21,7 +21,7 @@ def render_launch_agent_plist(paths: GTNPaths, python_executable: Path, cadence_
     payload = {
         "Label": DEFAULT_LAUNCH_AGENT_LABEL,
         "ProgramArguments": [
-            str(python_executable.resolve()),
+            str(python_executable.expanduser()),
             "-m",
             "runtime.gtn_local_product",
             "--root",

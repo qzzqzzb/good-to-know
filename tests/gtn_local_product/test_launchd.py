@@ -21,7 +21,7 @@ class LaunchdTests(unittest.TestCase):
             self.assertNotIn("StartInterval", payload)
             self.assertEqual(payload["StartCalendarInterval"][0], {"Hour": 0, "Minute": 0})
             self.assertTrue(payload["RunAtLoad"])
-            self.assertEqual(Path(payload["ProgramArguments"][0]), gtn_path.resolve())
+            self.assertEqual(Path(payload["ProgramArguments"][0]), gtn_path)
             self.assertEqual(payload["ProgramArguments"][1:4], ["-m", "runtime.gtn_local_product", "--root"])
             self.assertEqual(payload["ProgramArguments"][4], str(paths.root))
             self.assertEqual(payload["ProgramArguments"][5:], ["run", "--scheduled"])
